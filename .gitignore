@@ -1,0 +1,19 @@
+# Binaries
+flow
+*.exe
+*.dll
+*.so
+*.dylib
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Editor Specific
+.vscode/
+.idea/
+*.swp
+
+# Keys and Secrets
+*.key
+.env

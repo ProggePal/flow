@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Step struct {
@@ -44,12 +45,20 @@ func main() {
 	var conf Config
 	json.Unmarshal(data, &conf)
 
+	runFlow(conf)
+
+	copyToClipboard(results[conf.Steps[len(conf.Steps)-1].ID])
+	fmt.Printf("✅ %s finished. Result copied to clipboard.\n", flowName)
+}
+
+func runFlow(conf Config) {
 	var wg sync.WaitGroup
 	for _, step := range conf.Steps {
 		wg.Add(1)
 		go func(s Step) {
 			defer wg.Done()
 			for !depsReady(s.Prompt) {
+				time.Sleep(100 * time.Millisecond)
 			} // Automatic Parallel Detection
 
 			model := conf.Model
@@ -65,9 +74,6 @@ func main() {
 		}(step)
 	}
 	wg.Wait()
-
-	copyToClipboard(results[conf.Steps[len(conf.Steps)-1].ID])
-	fmt.Printf("✅ %s finished. Result copied to clipboard.\n", flowName)
 }
 
 func getAPIKey() string {
@@ -105,7 +111,10 @@ func fillTags(prompt string) string {
 	return res
 }
 
-func callGemini(model, sys, prompt string) string {
+var callGemini = func(model, sys, prompt string) string {
+	if os.Getenv("MOCK_FLOW") == "true" {
+		return "Mocked response for: " + prompt
+	}
 	apiKey := getAPIKey()
 	if apiKey == "" {
 		fmt.Println("❌ No API Key! Run the installer or save to ~/.flow_key")
