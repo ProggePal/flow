@@ -37,7 +37,7 @@ func main() {
 	}
 
 	flowName := os.Args[1]
-	
+
 	// 1. Try local ./flows folder
 	path := fmt.Sprintf("./flows/%s.json", flowName)
 	data, err := os.ReadFile(path)
@@ -148,7 +148,8 @@ var callGemini = func(model, sys, prompt string) string {
 	}
 	apiKey := getAPIKey()
 	if apiKey == "" {
-		fmt.Println("❌ No API Key! Run the installer or save to ~/.flow_key")
+		fmt.Println("❌ No API Key found!")
+		fmt.Println("👉 Please run the installer again to set up your key.")
 		os.Exit(1)
 	}
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)

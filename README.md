@@ -1,8 +1,8 @@
 # Flow 🚀
 
 ### One-Time Setup
-Paste this in your Terminal:
-`curl -sSL https://raw.githubusercontent.com/ProggePal/flow/main/install.sh | bash`
+Paste this in your Terminal (replace `YOUR_KEY_HERE` with your actual Gemini API Key):
+`GEMINI_API_KEY="YOUR_KEY_HERE" curl -sSL https://raw.githubusercontent.com/ProggePal/flow/main/install.sh | bash`
 
 ### How to run a workflow
 1. Copy your source text (transcript, notes, etc).
