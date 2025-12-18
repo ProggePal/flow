@@ -2,7 +2,7 @@
 
 ### One-Time Setup
 Paste this in your Terminal:
-`curl -sSL https://raw.githubusercontent.com/YOUR_USER/flow/main/install.sh | bash`
+`curl -sSL https://raw.githubusercontent.com/ProggePal/flow/main/install.sh | bash`
 
 ### How to run a workflow
 1. Copy your source text (transcript, notes, etc).

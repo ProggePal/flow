@@ -1,5 +1,5 @@
 #!/bin/bash
-REPO_URL="https://github.com/YOUR_USER/flow"
+REPO_URL="https://github.com/ProggePal/flow"
 
 echo "🚀 Installing 'flow'..."
 sudo curl -L "$REPO_URL/releases/latest/download/flow" -o /usr/local/bin/flow
