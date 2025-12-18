@@ -32,6 +32,7 @@ var (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: flow <name>")
+		listFlows()
 		return
 	}
 
@@ -50,6 +51,7 @@ func main() {
 
 	if err != nil {
 		fmt.Printf("❌ Flow '%s' not found.\n", flowName)
+		listFlows()
 		return
 	}
 
@@ -60,6 +62,24 @@ func main() {
 
 	copyToClipboard(results[conf.Steps[len(conf.Steps)-1].ID])
 	fmt.Printf("✅ %s finished. Result copied to clipboard.\n", flowName)
+}
+
+func listFlows() {
+	fmt.Println("\nAvailable flows:")
+	
+	// Check local
+	files, _ := filepath.Glob("./flows/*.json")
+	for _, f := range files {
+		fmt.Printf("  - %s (local)\n", strings.TrimSuffix(filepath.Base(f), ".json"))
+	}
+
+	// Check global
+	home, _ := os.UserHomeDir()
+	globalFiles, _ := filepath.Glob(filepath.Join(home, ".flow", "flows", "*.json"))
+	for _, f := range globalFiles {
+		fmt.Printf("  - %s\n", strings.TrimSuffix(filepath.Base(f), ".json"))
+	}
+	fmt.Println()
 }
 
 func runFlow(conf Config) {
