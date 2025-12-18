@@ -43,8 +43,8 @@ sudo xattr -dr com.apple.quarantine /usr/local/bin/fast 2>/dev/null || true
 # 3. Bring in your Workflows
 echo "📂 Downloading your initial flows..."
 mkdir -p "$HOME/fast-flows/flows"
-curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scoping.json" -o "$HOME/fast-flows/flows/scoping.json"
+curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scope.json" -o "$HOME/fast-flows/flows/scope.json"
 
 echo ""
 echo "✨ All set! You can now use Fast Flow anywhere."
-echo "👉 Try it now: copy some text and type 'fast scoping' in your terminal."
+echo "👉 Try it now: copy some text and type 'fast scope' in your terminal."

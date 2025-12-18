@@ -56,7 +56,15 @@ func main() {
 	}
 
 	var conf Config
-	json.Unmarshal(data, &conf)
+	if err := json.Unmarshal(data, &conf); err != nil {
+		fmt.Printf("❌ Failed to parse flow configuration: %v\n", err)
+		return
+	}
+
+	if len(conf.Steps) == 0 {
+		fmt.Println("❌ Flow configuration has no steps.")
+		return
+	}
 
 	runFlow(conf)
 

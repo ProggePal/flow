@@ -45,9 +45,9 @@ sed -i '' "s|/usr/local/bin/fast|$SIM_DIR/bin/fast|g" "$SIM_DIR/install_sim.sh"
 sed -i '' "s|curl -L \"\$REPO_URL/releases/latest/download/fast\" -o .*|cp \"$LOCAL_BINARY\" \"$SIM_DIR/bin/fast\"|g" "$SIM_DIR/install_sim.sh"
 
 # Patch flows download to use local file
-# Matches: curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scoping.json" -o ...
+# Matches: curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scope.json" -o ...
 LOCAL_FLOWS_DIR="$(pwd)/flows"
-sed -i '' "s|curl -sSL \".*scoping.json\" -o|cp \"$LOCAL_FLOWS_DIR/scoping.json\"|g" "$SIM_DIR/install_sim.sh"
+sed -i '' "s|curl -sSL \".*scope.json\" -o|cp \"$LOCAL_FLOWS_DIR/scope.json\"|g" "$SIM_DIR/install_sim.sh"
 
 # 3. Run the installer
 echo "📦 Running simulated installation..."
