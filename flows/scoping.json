@@ -1,0 +1,14 @@
+{
+  "model": "gemini-1.5-pro",
+  "system_prompt": "You are a senior analyst. Output in Markdown.",
+  "steps": [
+    {
+      "id": "analysis",
+      "prompt": "Analyze these notes: {{clipboard}}"
+    },
+    {
+      "id": "soW",
+      "prompt": "Based on {{analysis}}, create a formal Scope of Work."
+    }
+  ]
+}
