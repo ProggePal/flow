@@ -45,6 +45,8 @@ echo "📂 Downloading your initial flows..."
 mkdir -p "$HOME/fast-flows/flows"
 curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scope.json" -o "$HOME/fast-flows/flows/scope.json"
 curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/sum.json" -o "$HOME/fast-flows/flows/sum.json"
+curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/reply.json" -o "$HOME/fast-flows/flows/reply.json"
+curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/how-to-flow.md" -o "$HOME/fast-flows/README.md"
 
 echo ""
 echo "✨ All set! You can now use Fast Flow anywhere."
