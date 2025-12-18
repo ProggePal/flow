@@ -15,10 +15,10 @@ mkdir -p "$SIM_DIR/bin"
 mkdir -p "$SIM_DIR/home"
 
 # We need the absolute path for the build artifact
-LOCAL_BINARY="$(pwd)/flow"
+LOCAL_BINARY="$(pwd)/fast"
 
 if [ ! -f "$LOCAL_BINARY" ]; then
-    echo -e "${RED}❌ Binary 'flow' not found. Run 'make build' first.${NC}"
+    echo -e "${RED}❌ Binary 'fast' not found. Run 'make build' first.${NC}"
     exit 1
 fi
 
@@ -56,7 +56,9 @@ export PATH="$(pwd)/$SIM_DIR/bin:$PATH"
 
 # Simulate user inputting the key
 FAKE_KEY="simulated-gemini-api-key-12345"
-echo "$FAKE_KEY" | bash "$SIM_DIR/install_sim.sh"
+export GEMINI_API_KEY="$FAKE_KEY"
+echo "Running install with GEMINI_API_KEY set..."
+bash "$SIM_DIR/install_sim.sh"
 
 # 4. Verify Installation
 echo "🔍 Verifying installation..."

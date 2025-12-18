@@ -98,6 +98,10 @@ func runFlow(conf Config) {
 			}
 
 			res := callGemini(model, conf.SystemPrompt, fillTags(s.Prompt))
+			if res == "" {
+				fmt.Printf("❌ Step '%s' failed. Stopping flow.\n", s.ID)
+				os.Exit(1)
+			}
 
 			mu.Lock()
 			results[s.ID] = res
@@ -165,14 +169,48 @@ var callGemini = func(model, sys, prompt string) string {
 	}
 
 	jsonData, _ := json.Marshal(payload)
-	resp, _ := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		fmt.Printf("❌ Network error: %v\n", err)
+		return ""
+	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	var res map[string]interface{}
-	json.Unmarshal(body, &res)
+	if err := json.Unmarshal(body, &res); err != nil {
+		fmt.Printf("❌ Failed to parse API response: %v\nBody: %s\n", err, string(body))
+		return ""
+	}
 
-	return res["candidates"].([]interface{})[0].(map[string]interface{})["content"].(map[string]interface{})["parts"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	if errVal, ok := res["error"]; ok {
+		fmt.Printf("❌ API Error: %v\n", errVal)
+		return ""
+	}
+
+	candidates, ok := res["candidates"].([]interface{})
+	if !ok || len(candidates) == 0 {
+		// Check if it was blocked due to safety
+		if promptFeedback, ok := res["promptFeedback"]; ok {
+			fmt.Printf("❌ Prompt blocked. Feedback: %v\n", promptFeedback)
+		} else {
+			fmt.Printf("❌ No candidates returned. Response: %s\n", string(body))
+		}
+		return ""
+	}
+
+	candidate := candidates[0].(map[string]interface{})
+	content, ok := candidate["content"].(map[string]interface{})
+	if !ok {
+		if finishReason, ok := candidate["finishReason"]; ok {
+			fmt.Printf("❌ Generation stopped. Reason: %v\n", finishReason)
+		} else {
+			fmt.Printf("❌ Unexpected response structure: %s\n", string(body))
+		}
+		return ""
+	}
+
+	return content["parts"].([]interface{})[0].(map[string]interface{})["text"].(string)
 }
 
 func copyToClipboard(s string) {

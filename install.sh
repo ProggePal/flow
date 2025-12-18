@@ -7,6 +7,11 @@ echo "👋 Let's get Fast Flow set up on your Mac!"
 # 1. Handle the API Key (The "Magic" behind the AI)
 if [ -s "$KEY_FILE" ]; then
     echo "✅ Found your API Key."
+elif [ -n "$GEMINI_API_KEY" ]; then
+    echo "✅ Found GEMINI_API_KEY in environment."
+    echo "$GEMINI_API_KEY" > "$KEY_FILE"
+    chmod 600 "$KEY_FILE"
+    echo "✅ Key saved safely."
 else
     echo "🔑 To start, you'll need a Gemini API Key."
     echo "   (You can get one for free here: https://aistudio.google.com/app/apikey)"
