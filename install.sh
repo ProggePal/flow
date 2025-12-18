@@ -44,6 +44,7 @@ sudo xattr -dr com.apple.quarantine /usr/local/bin/fast 2>/dev/null || true
 echo "📂 Downloading your initial flows..."
 mkdir -p "$HOME/fast-flows/flows"
 curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scope.json" -o "$HOME/fast-flows/flows/scope.json"
+curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/sum.json" -o "$HOME/fast-flows/flows/sum.json"
 
 echo ""
 echo "✨ All set! You can now use Fast Flow anywhere."

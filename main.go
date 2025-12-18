@@ -100,6 +100,18 @@ func runFlow(conf Config) {
 				time.Sleep(100 * time.Millisecond)
 			} // Automatic Parallel Detection
 
+			// Feedback
+			tags := regexp.MustCompile(`{{(.*?)}}`).FindAllStringSubmatch(s.Prompt, -1)
+			var sources []string
+			for _, t := range tags {
+				sources = append(sources, t[1])
+			}
+			sourceStr := strings.Join(sources, " + ")
+			if len(sources) == 0 {
+				sourceStr = "Start"
+			}
+			fmt.Printf("  %s -> %s ...\n", sourceStr, s.ID)
+
 			model := conf.Model
 			if s.Model != "" {
 				model = s.Model

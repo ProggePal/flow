@@ -1,0 +1,10 @@
+{
+  "model": "gemini-2.5-flash",
+  "system_prompt": "You are a helpful assistant that summarizes text.",
+  "steps": [
+    {
+      "id": "summary",
+      "prompt": "Summarize the following text concisely: {{clipboard}}"
+    }
+  ]
+}

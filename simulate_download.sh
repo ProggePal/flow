@@ -48,6 +48,7 @@ sed -i '' "s|curl -L \"\$REPO_URL/releases/latest/download/fast\" -o .*|cp \"$LO
 # Matches: curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scope.json" -o ...
 LOCAL_FLOWS_DIR="$(pwd)/flows"
 sed -i '' "s|curl -sSL \".*scope.json\" -o|cp \"$LOCAL_FLOWS_DIR/scope.json\"|g" "$SIM_DIR/install_sim.sh"
+sed -i '' "s|curl -sSL \".*sum.json\" -o|cp \"$LOCAL_FLOWS_DIR/sum.json\"|g" "$SIM_DIR/install_sim.sh"
 
 # 3. Run the installer
 echo "📦 Running simulated installation..."
