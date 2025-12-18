@@ -1,4 +1,4 @@
-# Flow 🚀
+# Fast Flow 🚀
 
 ### One-Time Setup
 Paste this in your Terminal (replace `YOUR_KEY_HERE` with your actual Gemini API Key):
@@ -6,7 +6,7 @@ Paste this in your Terminal (replace `YOUR_KEY_HERE` with your actual Gemini API
 
 ### How to run a workflow
 1. Copy your source text (transcript, notes, etc).
-2. Type `flow scoping` (where 'scoping' is the name of a file in the /flows folder).
+2. Type `fast scoping` (where 'scoping' is the name of a file in the /flows folder).
 3. The result is automatically copied to your clipboard.
 
 ### How it works

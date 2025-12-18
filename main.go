@@ -31,7 +31,7 @@ var (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: flow <name>")
+		fmt.Println("Usage: fast <name>")
 		listFlows()
 		return
 	}
@@ -42,10 +42,10 @@ func main() {
 	path := fmt.Sprintf("./flows/%s.json", flowName)
 	data, err := os.ReadFile(path)
 	
-	// 2. Try global ~/.flow/flows folder
+	// 2. Try global ~/fast-flows/flows folder
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, ".flow", "flows", flowName+".json")
+		path = filepath.Join(home, "fast-flows", "flows", flowName+".json")
 		data, err = os.ReadFile(path)
 	}
 
@@ -75,7 +75,7 @@ func listFlows() {
 
 	// Check global
 	home, _ := os.UserHomeDir()
-	globalFiles, _ := filepath.Glob(filepath.Join(home, ".flow", "flows", "*.json"))
+	globalFiles, _ := filepath.Glob(filepath.Join(home, "fast-flows", "flows", "*.json"))
 	for _, f := range globalFiles {
 		fmt.Printf("  - %s\n", strings.TrimSuffix(filepath.Base(f), ".json"))
 	}
@@ -112,7 +112,7 @@ func getAPIKey() string {
 		return key
 	}
 	home, _ := os.UserHomeDir()
-	keyData, _ := os.ReadFile(filepath.Join(home, ".flow_key"))
+	keyData, _ := os.ReadFile(filepath.Join(home, ".fast_key"))
 	return strings.TrimSpace(string(keyData))
 }
 
@@ -149,6 +149,9 @@ var callGemini = func(model, sys, prompt string) string {
 	apiKey := getAPIKey()
 	if apiKey == "" {
 		fmt.Println("❌ No API Key found!")
+		home, _ := os.UserHomeDir()
+		keyPath := filepath.Join(home, ".fast_key")
+		fmt.Printf("   (Checked environment variable GEMINI_API_KEY and file: %s)\n", keyPath)
 		fmt.Println("👉 Please run the installer again to set up your key.")
 		os.Exit(1)
 	}

@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # 1. Build the binary
-echo "📦 Building 'flow' binary..."
+echo "📦 Building 'fast' binary..."
 # Build for macOS (ARM64) - Change GOOS/GOARCH if you need to support other platforms
-env GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o flow main.go
+env GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o fast main.go
 
 if [ $? -ne 0 ]; then
     echo "❌ Build failed."
     exit 1
 fi
 
-echo "✅ Build successful: ./flow"
+echo "✅ Build successful: ./fast"
 
 # 2. Instructions for GitHub Release
 echo ""
@@ -27,6 +27,6 @@ echo "   - Title: Release v1.0.0"
 echo "   - Description: Initial release"
 echo ""
 echo "3. Upload the binary:"
-echo "   - Drag and drop the 'flow' file generated in this folder to the release assets."
+echo "   - Drag and drop the 'fast' file generated in this folder to the release assets."
 echo ""
 echo "4. Publish Release!"

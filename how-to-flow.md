@@ -6,7 +6,7 @@ Here is a clean, Markdown-formatted **`how-to-flow.md`** you can include in your
 
 # 🛠 How to Create a Flow
 
-A "Flow" is a simple JSON file that tells the AI how to process your data. All flows live in the `/flows` folder. The name of the file becomes the command you type (e.g., `scoping.json` → `flow scoping`).
+A "Flow" is a simple JSON file that tells the AI how to process your data. All flows live in the `/flows` folder. The name of the file becomes the command you type (e.g., `scoping.json` → `fast scoping`).
 
 ## 1. The Basic Template
 

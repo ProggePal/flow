@@ -1,5 +1,5 @@
 # Binaries
-flow
+fast
 *.exe
 *.dll
 *.so
@@ -17,3 +17,6 @@ Thumbs.db
 # Keys and Secrets
 *.key
 .env
+
+# Simulation
+tmp_simulation/

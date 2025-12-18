@@ -1,8 +1,8 @@
 #!/bin/bash
 REPO_URL="https://github.com/ProggePal/flow"
-KEY_FILE="$HOME/.flow_key"
+KEY_FILE="$HOME/.fast_key"
 
-echo "👋 Let's get Flow set up on your Mac!"
+echo "👋 Let's get Fast Flow set up on your Mac!"
 
 # 1. Handle the API Key (The "Magic" behind the AI)
 if [ -s "$KEY_FILE" ]; then
@@ -28,18 +28,18 @@ else
 fi
 
 # 2. Add the Flow tool to your computer
-echo "🚀 Installing the Flow command..."
-sudo curl -L "$REPO_URL/releases/latest/download/flow" -o /usr/local/bin/flow
-sudo chmod +x /usr/local/bin/flow
+echo "🚀 Installing the Fast Flow command..."
+sudo curl -L "$REPO_URL/releases/latest/download/fast" -o /usr/local/bin/fast
+sudo chmod +x /usr/local/bin/fast
 
 # This line ensures macOS doesn't show a "Damaged App" warning
-sudo xattr -dr com.apple.quarantine /usr/local/bin/flow 2>/dev/null || true
+sudo xattr -dr com.apple.quarantine /usr/local/bin/fast 2>/dev/null || true
 
 # 3. Bring in your Workflows
 echo "📂 Downloading your initial flows..."
-mkdir -p "$HOME/.flow/flows"
-curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scoping.json" -o "$HOME/.flow/flows/scoping.json"
+mkdir -p "$HOME/fast-flows/flows"
+curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scoping.json" -o "$HOME/fast-flows/flows/scoping.json"
 
 echo ""
-echo "✨ All set! You can now use Flow anywhere."
-echo "👉 Try it now: copy some text and type 'flow scoping' in your terminal."
+echo "✨ All set! You can now use Fast Flow anywhere."
+echo "👉 Try it now: copy some text and type 'fast scoping' in your terminal."
