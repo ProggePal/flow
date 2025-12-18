@@ -36,7 +36,18 @@ func main() {
 	}
 
 	flowName := os.Args[1]
-	data, err := os.ReadFile(fmt.Sprintf("./flows/%s.json", flowName))
+	
+	// 1. Try local ./flows folder
+	path := fmt.Sprintf("./flows/%s.json", flowName)
+	data, err := os.ReadFile(path)
+	
+	// 2. Try global ~/.flow/flows folder
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, ".flow", "flows", flowName+".json")
+		data, err = os.ReadFile(path)
+	}
+
 	if err != nil {
 		fmt.Printf("❌ Flow '%s' not found.\n", flowName)
 		return
