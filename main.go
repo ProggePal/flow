@@ -25,18 +25,22 @@ type Config struct {
 }
 
 var (
-	results = make(map[string]string)
-	mu      sync.Mutex
+	results   = make(map[string]string)
+	userInput string
+	mu        sync.Mutex
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: fast <name>")
+		fmt.Println("Usage: fast <name> [input]")
 		listFlows()
 		return
 	}
 
 	flowName := os.Args[1]
+	if len(os.Args) > 2 {
+		userInput = strings.Join(os.Args[2:], " ")
+	}
 
 	// 1. Try local ./flows folder
 	path := fmt.Sprintf("./flows/%s.json", flowName)
@@ -145,7 +149,7 @@ func depsReady(prompt string) bool {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, t := range tags {
-		if t[1] != "clipboard" && results[t[1]] == "" {
+		if t[1] != "clipboard" && t[1] != "input" && results[t[1]] == "" {
 			return false
 		}
 	}
@@ -159,6 +163,9 @@ func fillTags(prompt string) string {
 	if strings.Contains(res, "{{clipboard}}") {
 		out, _ := exec.Command("pbpaste").Output()
 		res = strings.ReplaceAll(res, "{{clipboard}}", string(out))
+	}
+	if strings.Contains(res, "{{input}}") {
+		res = strings.ReplaceAll(res, "{{input}}", userInput)
 	}
 	for k, v := range results {
 		res = strings.ReplaceAll(res, "{{"+k+"}}", v)

@@ -1,9 +1,3 @@
-This is a great idea. Since your colleagues are essentially "Recipe Authors" now, they need a simple guide that explains how to use the "Tags," "Tabs," and "Parallelism" without getting bogged down in technical jargon.
-
-Here is a clean, Markdown-formatted **`how-to-flow.md`** you can include in your repository.
-
----
-
 # 🛠 How to Create a Flow
 
 A "Flow" is a simple JSON file that tells the AI how to process your data. All flows live in the `/flows` folder. The name of the file becomes the command you type (e.g., `scope.json` → `fast scope`).
@@ -14,7 +8,7 @@ Every flow starts with a global model and a list of steps.
 
 ```json
 {
-  "model": "gemini-1.5-pro",
+  "model": "gemini-2.5-flash",
   "system_prompt": "Optional: Describe the AI's personality here.",
   "steps": [
     {
@@ -33,6 +27,7 @@ Every flow starts with a global model and a list of steps.
 Tags allow steps to talk to each other. You don't need to tell the engine what order to run things in; it figures it out by looking at your tags.
 
 * **`{{clipboard}}`**: Injects whatever text you currently have copied.
+* **`{{input}}`**: Injects text typed after the command (e.g., `fast reply "I am sick"`). If no input is provided, it becomes an empty string.
 * **`{{id}}`**: Injects the result of a previous step (e.g., `{{analysis}}`).
 
 ### Automatic Parallelism
@@ -63,8 +58,8 @@ By default, every step is a "Fresh Start" and the AI forgets what happened in th
 
 You can use a cheaper, faster model for simple tasks and the big "Pro" model for the hard work.
 
-* **`gemini-1.5-flash`**: Fast & Cheap (Best for summarizing, cleaning text, or extracting names).
-* **`gemini-1.5-pro`**: Smart & Deep (Best for drafting complex documents or reasoning).
+* **`gemini-2.0-flash`**: Fast & Cheap (Best for summarizing, cleaning text, or extracting names).
+* **`gemini-2.5-pro`**: Smart & Deep (Best for drafting complex documents or reasoning).
 
 ```json
 {
@@ -89,6 +84,3 @@ The engine is smart: it automatically takes the **very last step** in your JSON 
 2. **Chain Logic:** Break big tasks into small steps. Instead of one giant prompt, do: `Clean` → `Extract` → `Draft`.
 3. **Naming:** Give your steps clear IDs like `summary` or `tasks` so your tags are easy to read: `{{summary}}`.
 
----
-
-Would you like me to add a **"Troubleshooting"** section to this guide for common errors like missing API keys or broken JSON?

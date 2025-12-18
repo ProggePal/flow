@@ -1,0 +1,10 @@
+{
+  "model": "gemini-2.0-flash",
+  "systemPrompt": "You are a helpful assistant that writes professional replies.",
+  "steps": [
+    {
+      "id": "reply",
+      "prompt": "Context (e.g. email received):\n{{clipboard}}\n\nInstruction for reply:\n{{input}}\n\nPlease write a reply based on the context and instruction."
+    }
+  ]
+}
