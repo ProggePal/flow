@@ -24,7 +24,7 @@ func TestRunFlow(t *testing.T) {
 		},
 	}
 
-	runFlow(conf)
+	runFlow(conf, nil)
 
 	if results["step1"] != "Mocked response for: Hello" {
 		t.Errorf("Expected step1 result, got %s", results["step1"])
