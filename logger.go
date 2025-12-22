@@ -8,30 +8,30 @@ import (
 	"time"
 )
 
-type SessionLog struct {
-	Timestamp time.Time         `json:"timestamp"`
-	FlowName  string            `json:"flow_name"`
-	Input     string            `json:"input"`
-	Clipboard string            `json:"clipboard"`
-	Config    Config            `json:"config"`
-	Results   map[string]string `json:"results"`
-}
+func saveSessionLog(flowName, input, clipboard string, conf Config, results map[string]string, histories map[string][]ChatMessage) {
+	// Create a copy of config to modify
+	logConf := conf
+	logConf.Timestamp = time.Now()
+	logConf.FlowName = flowName
+	logConf.Input = input
+	logConf.Clipboard = clipboard
+	
+	newSteps := make([]Step, len(conf.Steps))
+	copy(newSteps, conf.Steps)
+	logConf.Steps = newSteps
 
-func saveSessionLog(flowName, input, clipboard string, conf Config, results map[string]string) {
-	log := SessionLog{
-		Timestamp: time.Now(),
-		FlowName:  flowName,
-		Input:     input,
-		Clipboard: clipboard,
-		Config:    conf,
-		Results:   results,
+	for i := range logConf.Steps {
+		stepID := logConf.Steps[i].ID
+		if res, ok := results[stepID]; ok {
+			logConf.Steps[i].Output = res
+		}
+		if hist, ok := histories[stepID]; ok {
+			logConf.Steps[i].History = hist
+		}
 	}
 
-	data, err := json.MarshalIndent(log, "", "  ")
+	data, err := json.MarshalIndent(logConf, "", "  ")
 	if err != nil {
-		// Silently fail or print to stderr? TUI might be running or just finished.
-		// Since this runs in the background goroutine, printing might interfere if TUI is still active,
-		// but we call this after the flow is done.
 		return
 	}
 

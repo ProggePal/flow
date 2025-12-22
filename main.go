@@ -22,23 +22,30 @@ import (
 
 type Step struct {
 	ID, TabID, Model, Prompt string
-	Type                     string `json:"type"`      // "text", "interaction", "selector", "file_write"
-	MaxTurns                 *int   `json:"max_turns"` // for interaction
-	Source                   string `json:"source"`    // for selector
-	Filename                 string `json:"filename"`  // for file_write
-	Content                  string `json:"content"`   // for file_write
-	If                       string `json:"if"`        // conditional execution
+	Type                     string        `json:"type"`               // "text", "interaction", "selector", "file_write"
+	MaxTurns                 *int          `json:"max_turns"`          // for interaction
+	Source                   string        `json:"source"`             // for selector
+	Filename                 string        `json:"filename"`           // for file_write
+	Content                  string        `json:"content"`            // for file_write
+	If                       string        `json:"if"`                 // conditional execution
+	Output                   string        `json:"output,omitempty"`   // Result of the step
+	History                  []ChatMessage `json:"history,omitempty"`  // Chat history for interaction steps
 }
 
 type Config struct {
 	Model, SystemPrompt string
 	Steps               []Step
+	Timestamp           time.Time `json:"timestamp,omitempty"`
+	FlowName            string    `json:"flow_name,omitempty"`
+	Input               string    `json:"input,omitempty"`
+	Clipboard           string    `json:"clipboard,omitempty"`
 }
 
 // --- Main Logic ---
 
 var (
 	results   = make(map[string]string)
+	histories = make(map[string][]ChatMessage)
 	userInput string
 	mu        sync.Mutex
 	inputChan = make(chan string) // Channel for TUI to send user input
@@ -75,19 +82,7 @@ func main() {
 
 	var conf Config
 	// Try to clean up markdown code blocks if present
-	cleanData := data
-	strData := string(data)
-	if strings.HasPrefix(strings.TrimSpace(strData), "```json") {
-		strData = strings.TrimSpace(strData)
-		strData = strings.TrimPrefix(strData, "```json")
-		strData = strings.TrimSuffix(strData, "```")
-		cleanData = []byte(strData)
-	} else if strings.HasPrefix(strings.TrimSpace(strData), "```") {
-		strData = strings.TrimSpace(strData)
-		strData = strings.TrimPrefix(strData, "```")
-		strData = strings.TrimSuffix(strData, "```")
-		cleanData = []byte(strData)
-	}
+	cleanData := []byte(cleanMarkdown(string(data)))
 
 	if err := json.Unmarshal(cleanData, &conf); err != nil {
 		fmt.Printf("❌ Failed to parse flow configuration: %v\n", err)
@@ -112,7 +107,7 @@ func main() {
 		runFlow(conf, p)
 		finalResult := results[conf.Steps[len(conf.Steps)-1].ID]
 		copyToClipboard(finalResult)
-		saveSessionLog(flowName, userInput, clipboardContent, conf, results)
+		saveSessionLog(flowName, userInput, clipboardContent, conf, results, histories)
 		p.Send(FlowFinishedMsg{Result: finalResult})
 	}()
 
@@ -211,6 +206,10 @@ func runFlow(conf Config, p *tea.Program) {
 						sb.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Parts[0]["text"]))
 					}
 					res = sb.String()
+
+					mu.Lock()
+					histories[s.ID] = history
+					mu.Unlock()
 				}
 			} else if s.Type == "selector" {
 				// Resolve source path
@@ -285,6 +284,11 @@ func runFlow(conf Config, p *tea.Program) {
 				if shouldRun {
 					fname := fillTags(s.Filename)
 					content := fillTags(s.Content)
+					
+					// Clean markdown if it's a JSON file we are writing
+					if strings.HasSuffix(fname, ".json") {
+						content = cleanMarkdown(content)
+					}
 					
 					// Ensure directory exists
 					dir := filepath.Dir(fname)
@@ -496,4 +500,16 @@ func copyToClipboard(s string) {
 	cmd := exec.Command("pbcopy")
 	cmd.Stdin = strings.NewReader(s)
 	cmd.Run()
+}
+
+func cleanMarkdown(data string) string {
+	strData := strings.TrimSpace(data)
+	if strings.HasPrefix(strData, "```json") {
+		strData = strings.TrimPrefix(strData, "```json")
+		strData = strings.TrimSuffix(strData, "```")
+	} else if strings.HasPrefix(strData, "```") {
+		strData = strings.TrimPrefix(strData, "```")
+		strData = strings.TrimSuffix(strData, "```")
+	}
+	return strings.TrimSpace(strData)
 }
