@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/paal/Appfarm/palstools/flow/flow.schema.json",
+  "title": "Fast Flow Configuration",
+  "description": "Configuration for Fast Flow AI automation tool",
+  "type": "object",
+  "required": ["model", "steps"],
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "The default Gemini model to use (e.g., gemini-2.0-flash).",
+      "default": "gemini-2.0-flash"
+    },
+    "system_prompt": {
+      "type": "string",
+      "description": "Global system instructions for the AI."
+    },
+    "steps": {
+      "type": "array",
+      "description": "List of steps to execute.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for the step."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["text", "interaction", "selector", "file_write"],
+            "default": "text",
+            "description": "The type of action to perform."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The instruction or content for the step. Supports {{variables}}."
+          },
+          "model": {
+            "type": "string",
+            "description": "Override the global model for this step."
+          },
+          "tab_id": {
+            "type": "string",
+            "description": "Group steps into the same chat history context."
+          },
+          "if": {
+            "type": "string",
+            "description": "Condition to evaluate before running. Skips if evaluates to 'false'."
+          },
+          "max_turns": {
+            "type": ["integer", "null"],
+            "description": "For 'interaction' type: Limit the number of turns. Set to 1 for single input."
+          },
+          "source": {
+            "type": "string",
+            "description": "For 'selector' type: Directory path to list files from."
+          },
+          "filename": {
+            "type": "string",
+            "description": "For 'file_write' type: Destination path."
+          },
+          "content": {
+            "type": "string",
+            "description": "For 'file_write' type: Content to write."
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "type": { "const": "selector" } } },
+            "then": { "required": ["source"] }
+          },
+          {
+            "if": { "properties": { "type": { "const": "file_write" } } },
+            "then": { "required": ["filename", "content"] }
+          }
+        ]
+      }
+    }
+  }
+}
