@@ -8,9 +8,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/tree"
 )
@@ -28,6 +29,11 @@ var (
 	rootStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	itemStyle       = lipgloss.NewStyle()
 	timerStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginLeft(1)
+	
+	// Chat Styles
+	senderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)
+	aiStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	toolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Italic(true)
 )
 
 // --- Model ---
@@ -61,11 +67,16 @@ type FlowModel struct {
 	Quitting         bool
 	Result           string
 	Err              error
-	Input            textinput.Model
+	
+	// Chat Components
+	Input            textarea.Model
 	InputMode        bool
 	CurrentStepID    string
-	ChatHistory      string
+	ChatHistory      []string // Raw markdown strings
 	Viewport         viewport.Model
+	Renderer         *glamour.TermRenderer
+	
+	// Selector Components
 	List             list.Model
 	ListMode         bool
 }
@@ -79,6 +90,28 @@ type StepInteractionRequiredMsg struct{ ID string }
 type StepInteractionOutputMsg struct {
 	ID     string
 	Output string
+}
+
+type StepStreamStartMsg struct {
+	ID string
+}
+
+type StepStreamMsg struct {
+	ID    string
+	Chunk string
+}
+
+type StepToolCallMsg struct {
+	ID   string
+	Name string
+	Args map[string]interface{}
+}
+
+type StepToolResultMsg struct {
+	ID      string
+	Name    string
+	Success bool
+	Result  string
 }
 
 type FileInfo struct {
@@ -138,14 +171,20 @@ func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 		steps[i] = &StepStatus{Step: step, State: StatePending, ParentID: parent}
 	}
 
-	ti := textinput.New()
-	ti.Placeholder = "Type your message..."
-	ti.Focus()
-	ti.CharLimit = 1000
-	ti.Width = 50
+	ta := textarea.New()
+	ta.Placeholder = "Type your message... (Ctrl+S to send, Esc to end chat)"
+	ta.Focus()
+	ta.CharLimit = 0 // Unlimited
+	ta.SetHeight(3)
+	ta.ShowLineNumbers = false
 
-	vp := viewport.New(80, 10)
+	vp := viewport.New(80, 20)
 	vp.SetContent("Welcome to Fast Flow Chat.\n")
+
+	renderer, _ := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(80),
+	)
 
 	return FlowModel{
 		Config:           conf,
@@ -154,19 +193,34 @@ func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 		InputContent:     input,
 		Steps:            steps,
 		Spinner:          s,
-		Input:            ti,
+		Input:            ta,
 		Viewport:         vp,
+		Renderer:         renderer,
+		ChatHistory:      []string{},
 	}
 }
 
 func (m FlowModel) Init() tea.Cmd {
-	return m.Spinner.Tick
+	return tea.Batch(m.Spinner.Tick, textarea.Blink)
 }
 
 func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.Viewport.Width = msg.Width
+		m.Viewport.Height = msg.Height - 10 // Leave room for header/footer/input
+		m.Input.SetWidth(msg.Width)
+		return m, nil
+
+	case tea.MouseMsg:
+		if m.InputMode {
+			var vpCmd tea.Cmd
+			m.Viewport, vpCmd = m.Viewport.Update(msg)
+			return m, vpCmd
+		}
+
 	case tea.KeyMsg:
 		if m.ListMode {
 			switch msg.Type {
@@ -192,13 +246,29 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.InputMode {
+			// Handle scrolling for viewport
+			var vpCmd tea.Cmd
 			switch msg.Type {
-			case tea.KeyEnter:
+			case tea.KeyPgUp, tea.KeyPgDown:
+				m.Viewport, vpCmd = m.Viewport.Update(msg)
+			case tea.KeyCtrlUp:
+				m.Viewport.LineUp(1)
+			case tea.KeyCtrlDown:
+				m.Viewport.LineDown(1)
+			}
+
+			switch msg.Type {
+			case tea.KeyCtrlS: // Send message
 				val := m.Input.Value()
-				m.Input.SetValue("")
-				m.ChatHistory += "You: " + val + "\n"
-				m.Viewport.SetContent(m.ChatHistory)
-				m.Viewport.GotoBottom()
+				if strings.TrimSpace(val) == "" {
+					return m, nil
+				}
+				m.Input.Reset()
+				
+				// Add to history
+				userMsg := fmt.Sprintf("**You**\n%s", val)
+				m.ChatHistory = append(m.ChatHistory, userMsg)
+				m.updateViewport()
 				
 				// Set state back to Running (Thinking)
 				for _, s := range m.Steps {
@@ -219,7 +289,7 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.Input, cmd = m.Input.Update(msg)
-			return m, cmd
+			return m, tea.Batch(cmd, vpCmd)
 		}
 
 		if msg.String() == "q" || msg.String() == "ctrl+c" {
@@ -244,11 +314,42 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s.State = StateWaiting
 			}
 		}
-		return m, textinput.Blink
+		return m, textarea.Blink
 	case StepInteractionOutputMsg:
-		m.ChatHistory += "AI: " + msg.Output + "\n"
-		m.Viewport.SetContent(m.ChatHistory)
-		m.Viewport.GotoBottom()
+		// Add AI response to history
+		aiMsg := fmt.Sprintf("**AI**\n%s", msg.Output)
+		m.ChatHistory = append(m.ChatHistory, aiMsg)
+		m.updateViewport()
+		return m, nil
+	case StepStreamStartMsg:
+		// Start a new AI message
+		m.ChatHistory = append(m.ChatHistory, "**AI**\n")
+		m.updateViewport()
+		return m, nil
+	case StepStreamMsg:
+		// Append to the last message
+		if len(m.ChatHistory) > 0 {
+			m.ChatHistory[len(m.ChatHistory)-1] += msg.Chunk
+			m.updateViewport()
+		}
+		return m, nil
+	case StepToolCallMsg:
+		// Add tool call to history
+		toolMsg := fmt.Sprintf("🤖 Calling tool: `%s`...", msg.Name)
+		m.ChatHistory = append(m.ChatHistory, toolMsg)
+		m.updateViewport()
+		return m, nil
+	case StepToolResultMsg:
+		// Add tool result to history
+		var icon string
+		if msg.Success {
+			icon = "✅"
+		} else {
+			icon = "❌"
+		}
+		toolMsg := fmt.Sprintf("%s Tool `%s` finished", icon, msg.Name)
+		m.ChatHistory = append(m.ChatHistory, toolMsg)
+		m.updateViewport()
 		return m, nil
 	case StepSelectorRequiredMsg:
 		m.ListMode = true
@@ -297,11 +398,40 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *FlowModel) updateViewport() {
+	// Render all history with glamour
+	fullContent := strings.Join(m.ChatHistory, "\n\n---\n\n")
+	rendered, err := m.Renderer.Render(fullContent)
+	if err != nil {
+		rendered = fullContent // Fallback to raw text
+	}
+	m.Viewport.SetContent(rendered)
+	m.Viewport.GotoBottom()
+}
+
 func (m FlowModel) View() string {
 	if m.Err != nil {
 		return fmt.Sprintf("\n%s Error: %v\n", crossMark, m.Err)
 	}
 
+	// --- CHAT MODE ---
+	if m.InputMode {
+		header := titleStyle.Render(fmt.Sprintf("Chat: %s", m.CurrentStepID))
+		return fmt.Sprintf(
+			"\n%s\n\n%s\n\n%s\n%s",
+			header,
+			m.Viewport.View(),
+			m.Input.View(),
+			subtleStyle.Render("Ctrl+S to send • Esc to finish chat"),
+		)
+	}
+
+	// --- SELECTOR MODE ---
+	if m.ListMode {
+		return "\n" + lipgloss.NewStyle().Margin(1, 2).Render(m.List.View())
+	}
+
+	// --- PROGRESS MODE (Tree View) ---
 	var headerIcon string
 	if m.Result != "" {
 		headerIcon = checkMark.String()
@@ -438,23 +568,11 @@ func (m FlowModel) View() string {
 	}
 
 	footer := subtleStyle.Render("Press q to quit")
-	if m.InputMode {
-		footer = subtleStyle.Render("Press Esc to finish chat")
-	}
 	if m.Result != "" {
 		footer = fmt.Sprintf("%s %s", checkMark.String(), subtleStyle.Render("Flow Complete! (Result copied to clipboard)"))
 	}
 
 	view := "\n" + header + "\n\n" + finalTree + "\n\n" + footer + "\n"
-
-	if m.InputMode {
-		view += "\n" + m.Viewport.View()
-		view += "\n" + m.Input.View()
-	}
-
-	if m.ListMode {
-		view += "\n" + lipgloss.NewStyle().Margin(1, 2).Render(m.List.View())
-	}
 
 	return view
 }

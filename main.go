@@ -142,7 +142,7 @@ func main() {
 	clipboardContent = string(out)
 
 	// Initialize TUI
-	p := tea.NewProgram(InitialModel(conf, flowName, clipboardContent, userInput))
+	p := tea.NewProgram(InitialModel(conf, flowName, clipboardContent, userInput), tea.WithMouseCellMotion())
 
 	// Run flow in background
 	go func() {
@@ -233,10 +233,10 @@ func runFlow(conf Config, p *tea.Program) {
 
 						history = append(history, ChatMessage{Role: "user", Parts: []map[string]interface{}{{"text": userIn}}})
 						
-						aiRes, newMsgs := callGeminiChat(model, conf.SystemPrompt, history)
+						aiRes, newMsgs := callGeminiChat(model, conf.SystemPrompt, history, p, s.ID)
 						history = append(history, newMsgs...)
 
-						p.Send(StepInteractionOutputMsg{ID: s.ID, Output: aiRes})
+						// p.Send(StepInteractionOutputMsg{ID: s.ID, Output: aiRes})
 						
 						history = append(history, ChatMessage{Role: "model", Parts: []map[string]interface{}{{"text": aiRes}}})
 					}
@@ -444,7 +444,7 @@ func runFlow(conf Config, p *tea.Program) {
 					history := []ChatMessage{{Role: "user", Parts: []map[string]interface{}{{"text": prompt}}}}
 					
 					var newMsgs []ChatMessage
-					res, newMsgs = callGeminiChat(model, conf.SystemPrompt, history)
+					res, newMsgs = callGeminiChat(model, conf.SystemPrompt, history, p, s.ID)
 					
 					// Save history including tool calls
 					fullHistory := append(history, newMsgs...)
@@ -528,7 +528,7 @@ type ChatMessage struct {
 	Parts []map[string]interface{} `json:"parts"`
 }
 
-var callGeminiChat = func(model, sys string, history []ChatMessage) (string, []ChatMessage) {
+var callGeminiChat = func(model, sys string, history []ChatMessage, p *tea.Program, stepID string) (string, []ChatMessage) {
 	if os.Getenv("MOCK_FLOW") == "true" {
 		return "Mocked response", nil
 	}
@@ -605,22 +605,50 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) (string, []C
 
 	// Main interaction loop for function calling
 	for {
-		resp, err := client.Models.GenerateContent(ctx, model, contents, conf)
-		if err != nil {
-			fmt.Printf("Error generating content: %v\n", err)
-			return "", newMessages
+		// Use GenerateContentStream for streaming
+		iter := client.Models.GenerateContentStream(ctx, model, contents, conf)
+		
+		var fullText strings.Builder
+		var functionCall *genai.FunctionCall
+		firstChunk := true
+
+		for resp, err := range iter {
+			if err != nil {
+				fmt.Printf("Error generating content stream: %v\n", err)
+				return "", newMessages
+			}
+
+			if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+				part := resp.Candidates[0].Content.Parts[0]
+				
+				// Handle Text
+				if part.Text != "" {
+					if firstChunk {
+						if p != nil {
+							p.Send(StepStreamStartMsg{ID: stepID})
+						}
+						firstChunk = false
+					}
+					if p != nil {
+						p.Send(StepStreamMsg{ID: stepID, Chunk: part.Text})
+					}
+					fullText.WriteString(part.Text)
+				}
+
+				// Handle FunctionCall (usually comes in one chunk or we take the last one if accumulated, 
+				// but for simplicity assume it's present in the response part)
+				if part.FunctionCall != nil {
+					functionCall = part.FunctionCall
+				}
+			}
 		}
 
-		if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-			return "", newMessages
-		}
-
-		part := resp.Candidates[0].Content.Parts[0]
-
-		// Check for function call
-		if part.FunctionCall != nil {
-			fc := part.FunctionCall
-			fmt.Printf("🤖 Calling tool: %s\n", fc.Name)
+		// Check for function call after stream ends
+		if functionCall != nil {
+			fc := functionCall
+			if p != nil {
+				p.Send(StepToolCallMsg{ID: stepID, Name: fc.Name, Args: fc.Args})
+			}
 			
 			// Record FunctionCall
 			newMessages = append(newMessages, ChatMessage{
@@ -636,24 +664,26 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) (string, []C
 			})
 
 			// Execute tool
-			fmt.Printf("⏳ Executing %s...\n", fc.Name)
 			toolCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 			result, err := mcpManager.CallTool(toolCtx, fc.Name, fc.Args)
 			cancel()
 			
 			var toolResult map[string]interface{}
 			if err != nil {
-				fmt.Printf("❌ Tool error: %v\n", err)
+				if p != nil {
+					p.Send(StepToolResultMsg{ID: stepID, Name: fc.Name, Success: false, Result: err.Error()})
+				}
 				toolResult = map[string]interface{}{"error": err.Error()}
 			} else {
-				fmt.Printf("✅ Tool success\n")
-				// Convert MCP result to map for GenAI
+				if p != nil {
+					p.Send(StepToolResultMsg{ID: stepID, Name: fc.Name, Success: true, Result: "Success"})
+				}
 				toolResult = map[string]interface{}{"content": result.Content}
 			}
 
 			// Record FunctionResponse
 			newMessages = append(newMessages, ChatMessage{
-				Role: "function", // "function" role is often used for responses, but GenAI uses "user" with FunctionResponse part
+				Role: "function",
 				Parts: []map[string]interface{}{
 					{
 						"functionResponse": map[string]interface{}{
@@ -686,8 +716,8 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) (string, []C
 		}
 
 		// If it's text, return it
-		if part.Text != "" {
-			return part.Text, newMessages
+		if fullText.Len() > 0 {
+			return fullText.String(), newMessages
 		}
 		
 		return "", newMessages
