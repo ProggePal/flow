@@ -89,6 +89,7 @@ func main() {
 		runFlow(conf, p)
 		finalResult := results[conf.Steps[len(conf.Steps)-1].ID]
 		copyToClipboard(finalResult)
+		saveSessionLog(flowName, userInput, clipboardContent, conf, results)
 		p.Send(FlowFinishedMsg{Result: finalResult})
 	}()
 
