@@ -1,0 +1,12 @@
+{
+  "model": "gemini-2.0-flash",
+  "system_prompt": "You are a helpful assistant.",
+  "steps": [
+    {
+      "id": "chat_session",
+      "type": "interaction",
+      "max_turns": null,
+      "prompt": "Start chatting."
+    }
+  ]
+}

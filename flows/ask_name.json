@@ -1,0 +1,15 @@
+{
+  "model": "gemini-2.0-flash",
+  "steps": [
+    {
+      "id": "ask_name",
+      "type": "interaction",
+      "max_turns": 1,
+      "prompt": "What is your name?"
+    },
+    {
+      "id": "greet",
+      "prompt": "Say hello to {{ask_name}}"
+    }
+  ]
+}

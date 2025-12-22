@@ -72,7 +72,37 @@ You can use a cheaper, faster model for simple tasks and the big "Pro" model for
 
 ---
 
-## 5. Getting the Result
+## 5. The Interaction Block (Human-in-the-Loop)
+
+Sometimes you need to pause the flow and ask the user for input. You can do this with the `interaction` type.
+
+### Single Input (Form Field)
+Use `max_turns: 1` to ask a single question. The result is whatever the user types.
+
+```json
+{
+  "id": "ask_topic",
+  "type": "interaction",
+  "max_turns": 1,
+  "prompt": "What topic should I write about?"
+}
+```
+
+### Chat Session (Conversation)
+Use `max_turns: null` (or omit it) to start an open-ended chat. The flow pauses until the user presses **Esc**. The result is the full transcript of the conversation.
+
+```json
+{
+  "id": "brainstorm",
+  "type": "interaction",
+  "max_turns": null,
+  "prompt": "Let's brainstorm ideas. What's on your mind?"
+}
+```
+
+---
+
+## 6. Getting the Result
 
 The engine is smart: it automatically takes the **very last step** in your JSON file and copies it to your clipboard when the flow is done. You don't need to configure anything.
 

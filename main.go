@@ -21,6 +21,8 @@ import (
 
 type Step struct {
 	ID, TabID, Model, Prompt string
+	Type                     string `json:"type"`      // "text" (default) or "interaction"
+	MaxTurns                 *int   `json:"max_turns"` // null for infinite
 }
 
 type Config struct {
@@ -34,6 +36,7 @@ var (
 	results   = make(map[string]string)
 	userInput string
 	mu        sync.Mutex
+	inputChan = make(chan string) // Channel for TUI to send user input
 )
 
 func main() {
@@ -138,7 +141,48 @@ func runFlow(conf Config, p *tea.Program) {
 				model = s.Model
 			}
 
-			res := callGemini(model, conf.SystemPrompt, fillTags(s.Prompt))
+			var res string
+			if s.Type == "interaction" {
+				if s.Prompt != "" {
+					p.Send(StepInteractionOutputMsg{ID: s.ID, Output: s.Prompt})
+				}
+
+				if s.MaxTurns != nil && *s.MaxTurns == 1 {
+					p.Send(StepInteractionRequiredMsg{ID: s.ID})
+					res = <-inputChan
+				} else {
+					history := []ChatMessage{}
+					for {
+						p.Send(StepInteractionRequiredMsg{ID: s.ID})
+						userIn := <-inputChan
+						
+						if userIn == "__END_INTERACTION__" {
+							break
+						}
+
+						history = append(history, ChatMessage{Role: "user", Parts: []map[string]string{{"text": userIn}}})
+						
+						aiRes := callGeminiChat(model, conf.SystemPrompt, history)
+						p.Send(StepInteractionOutputMsg{ID: s.ID, Output: aiRes})
+						
+						history = append(history, ChatMessage{Role: "model", Parts: []map[string]string{{"text": aiRes}}})
+					}
+					
+					// Serialize history to text for result
+					var sb strings.Builder
+					for _, msg := range history {
+						role := "User"
+						if msg.Role == "model" {
+							role = "AI"
+						}
+						sb.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Parts[0]["text"]))
+					}
+					res = sb.String()
+				}
+			} else {
+				res = callGemini(model, conf.SystemPrompt, fillTags(s.Prompt))
+			}
+
 			if res == "" {
 				err := fmt.Errorf("step '%s' failed", s.ID)
 				if p != nil {
@@ -197,6 +241,56 @@ func fillTags(prompt string) string {
 		res = strings.ReplaceAll(res, "{{"+k+"}}", v)
 	}
 	return res
+}
+
+type ChatMessage struct {
+	Role  string              `json:"role"`
+	Parts []map[string]string `json:"parts"`
+}
+
+var callGeminiChat = func(model, sys string, history []ChatMessage) string {
+	if os.Getenv("MOCK_FLOW") == "true" {
+		return "Mocked response"
+	}
+	apiKey := getAPIKey()
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+
+	payload := map[string]interface{}{
+		"contents": history,
+	}
+	if sys != "" {
+		payload["system_instruction"] = map[string]interface{}{"parts": []map[string]string{{"text": sys}}}
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var res map[string]interface{}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return ""
+	}
+
+	if _, ok := res["error"]; ok {
+		return ""
+	}
+
+	candidates, ok := res["candidates"].([]interface{})
+	if !ok || len(candidates) == 0 {
+		return ""
+	}
+
+	candidate := candidates[0].(map[string]interface{})
+	content, ok := candidate["content"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	return content["parts"].([]interface{})[0].(map[string]interface{})["text"].(string)
 }
 
 var callGemini = func(model, sys, prompt string) string {

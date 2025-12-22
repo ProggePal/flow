@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/tree"
@@ -36,6 +37,7 @@ const (
 	StateRunning
 	StateDone
 	StateFailed
+	StateWaiting
 )
 
 type StepStatus struct {
@@ -57,6 +59,10 @@ type FlowModel struct {
 	Quitting         bool
 	Result           string
 	Err              error
+	Input            textinput.Model
+	InputMode        bool
+	CurrentStepID    string
+	ChatHistory      string
 }
 
 // Messages
@@ -64,6 +70,11 @@ type StepStartedMsg struct{ ID string }
 type StepDoneMsg struct{ ID string }
 type StepFailedMsg struct{ ID string; Err error }
 type FlowFinishedMsg struct{ Result string }
+type StepInteractionRequiredMsg struct{ ID string }
+type StepInteractionOutputMsg struct {
+	ID     string
+	Output string
+}
 
 func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 	s := spinner.New()
@@ -102,6 +113,12 @@ func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 		steps[i] = &StepStatus{Step: step, State: StatePending, ParentID: parent}
 	}
 
+	ti := textinput.New()
+	ti.Placeholder = "Type your message..."
+	ti.Focus()
+	ti.CharLimit = 1000
+	ti.Width = 50
+
 	return FlowModel{
 		Config:           conf,
 		FlowName:         flowName,
@@ -109,6 +126,7 @@ func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 		InputContent:     input,
 		Steps:            steps,
 		Spinner:          s,
+		Input:            ti,
 	}
 }
 
@@ -117,14 +135,44 @@ func (m FlowModel) Init() tea.Cmd {
 }
 
 func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.InputMode {
+			switch msg.Type {
+			case tea.KeyEnter:
+				val := m.Input.Value()
+				m.Input.SetValue("")
+				m.ChatHistory += "You: " + val + "\n"
+				
+				// Set state back to Running (Thinking)
+				for _, s := range m.Steps {
+					if s.Step.ID == m.CurrentStepID {
+						s.State = StateRunning
+					}
+				}
+
+				// Send to channel in a goroutine to avoid blocking Update
+				go func() { inputChan <- val }()
+				return m, nil
+			case tea.KeyEsc:
+				// Finish interaction
+				go func() { inputChan <- "__END_INTERACTION__" }()
+				return m, nil
+			case tea.KeyCtrlC:
+				m.Quitting = true
+				return m, tea.Quit
+			}
+			m.Input, cmd = m.Input.Update(msg)
+			return m, cmd
+		}
+
 		if msg.String() == "q" || msg.String() == "ctrl+c" {
 			m.Quitting = true
 			return m, tea.Quit
 		}
 	case spinner.TickMsg:
-		var cmd tea.Cmd
 		m.Spinner, cmd = m.Spinner.Update(msg)
 		return m, cmd
 	case StepStartedMsg:
@@ -134,7 +182,20 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s.StartTime = time.Now()
 			}
 		}
+	case StepInteractionRequiredMsg:
+		m.InputMode = true
+		m.CurrentStepID = msg.ID
+		for _, s := range m.Steps {
+			if s.Step.ID == msg.ID {
+				s.State = StateWaiting
+			}
+		}
+		return m, textinput.Blink
+	case StepInteractionOutputMsg:
+		m.ChatHistory += "AI: " + msg.Output + "\n"
+		return m, nil
 	case StepDoneMsg:
+		m.InputMode = false
 		for _, s := range m.Steps {
 			if s.Step.ID == msg.ID {
 				s.State = StateDone
@@ -239,6 +300,10 @@ func (m FlowModel) View() string {
 					icon = ""
 					style = runningStyle
 					timer = timerStyle.Render(fmt.Sprintf("%.1fs", time.Since(s.StartTime).Seconds()))
+				case StateWaiting:
+					icon = "➜"
+					style = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+					timer = timerStyle.Render("Awaits User")
 				case StateDone:
 					icon = "" // No checkmark in tree
 					style = itemStyle
@@ -297,9 +362,19 @@ func (m FlowModel) View() string {
 	}
 
 	footer := subtleStyle.Render("Press q to quit")
+	if m.InputMode {
+		footer = subtleStyle.Render("Press Esc to finish chat")
+	}
 	if m.Result != "" {
 		footer = fmt.Sprintf("%s %s", checkMark.String(), subtleStyle.Render("Flow Complete! (Result copied to clipboard)"))
 	}
 
-	return "\n" + header + "\n\n" + finalTree + "\n\n" + footer + "\n"
+	view := "\n" + header + "\n\n" + finalTree + "\n\n" + footer + "\n"
+
+	if m.InputMode {
+		view += "\n" + m.ChatHistory
+		view += "\n" + m.Input.View()
+	}
+
+	return view
 }
