@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -567,12 +568,21 @@ var callGeminiChat = func(model, sys string, history []ChatMessage, p *tea.Progr
 				if a, ok := fcMap["args"].(map[string]interface{}); ok {
 					args = a
 				}
-				parts = append(parts, &genai.Part{
+				gp := &genai.Part{
 					FunctionCall: &genai.FunctionCall{
 						Name: fcMap["name"].(string),
 						Args: args,
 					},
-				})
+				}
+				if tsStr, ok := p["thought_signature"].(string); ok {
+					if ts, err := base64.StdEncoding.DecodeString(tsStr); err == nil {
+						gp.ThoughtSignature = ts
+					}
+				}
+				if t, ok := p["thought"].(bool); ok {
+					gp.Thought = t
+				}
+				parts = append(parts, gp)
 			} else if frMap, ok := p["functionResponse"].(map[string]interface{}); ok {
 				// Reconstruct FunctionResponse
 				resp := make(map[string]interface{})
@@ -617,6 +627,8 @@ var callGeminiChat = func(model, sys string, history []ChatMessage, p *tea.Progr
 		
 		var fullText strings.Builder
 		var functionCall *genai.FunctionCall
+		var thoughtSignature []byte
+		var thought bool
 		firstChunk := true
 
 		for resp, err := range iter {
@@ -646,6 +658,12 @@ var callGeminiChat = func(model, sys string, history []ChatMessage, p *tea.Progr
 				// but for simplicity assume it's present in the response part)
 				if part.FunctionCall != nil {
 					functionCall = part.FunctionCall
+					if len(part.ThoughtSignature) > 0 {
+						thoughtSignature = part.ThoughtSignature
+					}
+					if part.Thought {
+						thought = part.Thought
+					}
 				}
 			}
 		}
@@ -658,15 +676,23 @@ var callGeminiChat = func(model, sys string, history []ChatMessage, p *tea.Progr
 			}
 			
 			// Record FunctionCall
+			partMap := map[string]interface{}{
+				"functionCall": map[string]interface{}{
+					"name": fc.Name,
+					"args": fc.Args,
+				},
+			}
+			if len(thoughtSignature) > 0 {
+				partMap["thought_signature"] = thoughtSignature
+			}
+			if thought {
+				partMap["thought"] = true
+			}
+
 			newMessages = append(newMessages, ChatMessage{
 				Role: "model",
 				Parts: []map[string]interface{}{
-					{
-						"functionCall": map[string]interface{}{
-							"name": fc.Name,
-							"args": fc.Args,
-						},
-					},
+					partMap,
 				},
 			})
 
@@ -702,9 +728,16 @@ var callGeminiChat = func(model, sys string, history []ChatMessage, p *tea.Progr
 			})
 
 			// Append model's function call to history
+			gp := &genai.Part{FunctionCall: fc}
+			if len(thoughtSignature) > 0 {
+				gp.ThoughtSignature = thoughtSignature
+			}
+			if thought {
+				gp.Thought = true
+			}
 			contents = append(contents, &genai.Content{
 				Role: "model",
-				Parts: []*genai.Part{{FunctionCall: fc}},
+				Parts: []*genai.Part{gp},
 			})
 
 			// Append our function response to history
