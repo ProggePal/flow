@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -79,6 +80,10 @@ type FlowModel struct {
 	// Selector Components
 	List             list.Model
 	ListMode         bool
+
+	// Flow Editor Components
+	FlowEditor       FlowEditorModel
+	EditorMode       bool
 }
 
 // Messages
@@ -123,6 +128,11 @@ type StepSelectorRequiredMsg struct {
 	ID     string
 	Files  []FileInfo
 	Prompt string
+}
+
+type StepFlowEditorRequiredMsg struct {
+	ID          string
+	JSONContent string
 }
 
 // List Item
@@ -212,6 +222,11 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Viewport.Width = msg.Width
 		m.Viewport.Height = msg.Height - 10 // Leave room for header/footer/input
 		m.Input.SetWidth(msg.Width)
+		
+		if m.EditorMode {
+			m.FlowEditor, cmd = m.FlowEditor.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 
 	case tea.MouseMsg:
@@ -222,6 +237,38 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		if m.EditorMode {
+			// Handle Editor Mode Keys
+			switch msg.Type {
+			case tea.KeyCtrlS:
+				if !m.FlowEditor.Editing {
+					// Save Flow and Exit Editor
+					// Serialize config back to JSON
+					bytes, _ := json.MarshalIndent(m.FlowEditor.Config, "", "  ")
+					val := string(bytes)
+					
+					// Set state back to Running
+					for _, s := range m.Steps {
+						if s.Step.ID == m.CurrentStepID {
+							s.State = StateRunning
+						}
+					}
+					go func() { inputChan <- val }()
+					m.EditorMode = false
+					return m, nil
+				}
+			case tea.KeyEsc:
+				if !m.FlowEditor.Editing {
+					// Cancel Editor
+					go func() { inputChan <- "no" }()
+					m.EditorMode = false
+					return m, nil
+				}
+			}
+			m.FlowEditor, cmd = m.FlowEditor.Update(msg)
+			return m, cmd
+		}
+
 		if m.ListMode {
 			switch msg.Type {
 			case tea.KeyEnter:
@@ -370,9 +417,22 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		l.SetShowHelp(false)
 		m.List = l
 		return m, nil
+	case StepFlowEditorRequiredMsg:
+		m.EditorMode = true
+		m.CurrentStepID = msg.ID
+		for _, s := range m.Steps {
+			if s.Step.ID == msg.ID {
+				s.State = StateWaiting
+			}
+		}
+		m.FlowEditor = NewFlowEditor(msg.JSONContent)
+		// Trigger resize to set dimensions
+		m.FlowEditor, _ = m.FlowEditor.Update(tea.WindowSizeMsg{Width: m.Viewport.Width, Height: m.Viewport.Height + 10})
+		return m, nil
 	case StepDoneMsg:
 		m.InputMode = false
 		m.ListMode = false
+		m.EditorMode = false
 		for _, s := range m.Steps {
 			if s.Step.ID == msg.ID {
 				s.State = StateDone
@@ -424,6 +484,11 @@ func (m FlowModel) View() string {
 			m.Input.View(),
 			subtleStyle.Render("Ctrl+S to send • Esc to finish chat"),
 		)
+	}
+
+	// --- EDITOR MODE ---
+	if m.EditorMode {
+		return "\n" + m.FlowEditor.View() + "\n" + subtleStyle.Render("Enter to edit • Ctrl+S to save step/flow • Esc to cancel edit")
 	}
 
 	// --- SELECTOR MODE ---

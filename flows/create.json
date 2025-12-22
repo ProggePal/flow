@@ -14,15 +14,20 @@
         },
         {
             "id": "user_review",
+            "type": "flow_editor",
+            "prompt": "{{draft_flow}}"
+        },
+        {
+            "id": "ask_filename",
             "type": "interaction",
-            "max_turns": 1,
-            "prompt": "I created this flow for you:\n\n{{draft_flow}}\n\nType a filename to save it (e.g. 'follow_up'), or type 'no' to cancel."
+            "prompt": "What should we name this flow? (e.g. my_flow)",
+            "if": "{{user_review}} != 'no'"
         },
         {
             "id": "save_file",
             "type": "file_write",
-            "filename": "~/fast-flows/flows/{{user_review}}.json",
-            "content": "{{draft_flow}}",
+            "filename": "~/fast-flows/flows/{{ask_filename}}.json",
+            "content": "{{user_review}}",
             "if": "{{user_review}} != 'no'"
         }
     ]

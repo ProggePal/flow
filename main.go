@@ -264,6 +264,13 @@ func runFlow(conf Config, p *tea.Program) {
 					histories[s.ID] = history
 					mu.Unlock()
 				}
+			} else if s.Type == "flow_editor" {
+				// Fill tags to get the JSON content (usually from a previous step)
+				jsonContent := fillTags(s.Prompt)
+				
+				p.Send(StepFlowEditorRequiredMsg{ID: s.ID, JSONContent: jsonContent})
+				res = <-inputChan
+				
 			} else if s.Type == "selector" {
 				// Resolve source path
 				sourcePath := fillTags(s.Source)
