@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/tree"
@@ -63,6 +65,9 @@ type FlowModel struct {
 	InputMode        bool
 	CurrentStepID    string
 	ChatHistory      string
+	Viewport         viewport.Model
+	List             list.Model
+	ListMode         bool
 }
 
 // Messages
@@ -75,6 +80,26 @@ type StepInteractionOutputMsg struct {
 	ID     string
 	Output string
 }
+
+type FileInfo struct {
+	Name string
+	Desc string
+}
+
+type StepSelectorRequiredMsg struct {
+	ID     string
+	Files  []FileInfo
+	Prompt string
+}
+
+// List Item
+type fileItem struct {
+	name, desc string
+}
+
+func (i fileItem) FilterValue() string { return i.name }
+func (i fileItem) Title() string       { return i.name }
+func (i fileItem) Description() string { return i.desc }
 
 func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 	s := spinner.New()
@@ -119,6 +144,9 @@ func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 	ti.CharLimit = 1000
 	ti.Width = 50
 
+	vp := viewport.New(80, 10)
+	vp.SetContent("Welcome to Fast Flow Chat.\n")
+
 	return FlowModel{
 		Config:           conf,
 		FlowName:         flowName,
@@ -127,6 +155,7 @@ func InitialModel(conf Config, flowName, clipboard, input string) FlowModel {
 		Steps:            steps,
 		Spinner:          s,
 		Input:            ti,
+		Viewport:         vp,
 	}
 }
 
@@ -139,12 +168,37 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.ListMode {
+			switch msg.Type {
+			case tea.KeyEnter:
+				i, ok := m.List.SelectedItem().(fileItem)
+				if ok {
+					val := i.name
+					// Set state back to Running
+					for _, s := range m.Steps {
+						if s.Step.ID == m.CurrentStepID {
+							s.State = StateRunning
+						}
+					}
+					go func() { inputChan <- val }()
+					return m, nil
+				}
+			case tea.KeyCtrlC:
+				m.Quitting = true
+				return m, tea.Quit
+			}
+			m.List, cmd = m.List.Update(msg)
+			return m, cmd
+		}
+
 		if m.InputMode {
 			switch msg.Type {
 			case tea.KeyEnter:
 				val := m.Input.Value()
 				m.Input.SetValue("")
 				m.ChatHistory += "You: " + val + "\n"
+				m.Viewport.SetContent(m.ChatHistory)
+				m.Viewport.GotoBottom()
 				
 				// Set state back to Running (Thinking)
 				for _, s := range m.Steps {
@@ -193,9 +247,31 @@ func (m FlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	case StepInteractionOutputMsg:
 		m.ChatHistory += "AI: " + msg.Output + "\n"
+		m.Viewport.SetContent(m.ChatHistory)
+		m.Viewport.GotoBottom()
+		return m, nil
+	case StepSelectorRequiredMsg:
+		m.ListMode = true
+		m.CurrentStepID = msg.ID
+		for _, s := range m.Steps {
+			if s.Step.ID == msg.ID {
+				s.State = StateWaiting
+			}
+		}
+		
+		items := make([]list.Item, len(msg.Files))
+		for i, f := range msg.Files {
+			items[i] = fileItem{name: f.Name, desc: f.Desc}
+		}
+		
+		l := list.New(items, list.NewDefaultDelegate(), 60, 14)
+		l.Title = msg.Prompt
+		l.SetShowHelp(false)
+		m.List = l
 		return m, nil
 	case StepDoneMsg:
 		m.InputMode = false
+		m.ListMode = false
 		for _, s := range m.Steps {
 			if s.Step.ID == msg.ID {
 				s.State = StateDone
@@ -372,8 +448,12 @@ func (m FlowModel) View() string {
 	view := "\n" + header + "\n\n" + finalTree + "\n\n" + footer + "\n"
 
 	if m.InputMode {
-		view += "\n" + m.ChatHistory
+		view += "\n" + m.Viewport.View()
 		view += "\n" + m.Input.View()
+	}
+
+	if m.ListMode {
+		view += "\n" + lipgloss.NewStyle().Margin(1, 2).Render(m.List.View())
 	}
 
 	return view

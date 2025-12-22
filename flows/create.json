@@ -1,0 +1,29 @@
+{
+    "id": "flow_factory",
+    "steps": [
+        {
+            "id": "log_data",
+            "type": "selector",
+            "source": "~/fast-flows/logs",
+            "prompt": "Which session do you want to turn into an automation?"
+        },
+        {
+            "id": "draft_flow",
+            "model": "gemini-2.0-flash",
+            "prompt": "Analyze this chat log: {{log_data}}.\n\nCreate a Fast Flow JSON file that automates the task performed in this log. \n\n### SCHEMA REFERENCE\nReturn a JSON object with this structure:\n```json\n{\n  \"model\": \"gemini-2.0-flash\",\n  \"system_prompt\": \"...\",\n  \"steps\": [\n    {\n      \"id\": \"step_id\",\n      \"type\": \"text\", // or \"interaction\", \"selector\", \"file_write\"\n      \"prompt\": \"Instructions for AI...\"\n    }\n  ]\n}\n```\n\n### RULES\n1. **Variables:** Use `{{clipboard}}` for pasted text and `{{input}}` for command-line arguments. Do NOT invent other tags.\n2. **Chaining:** To use the result of Step A in Step B, use `{{step_A_id}}` in Step B's prompt.\n3. **User Input:** If the flow needs to ask the user a question *during* execution, use `\"type\": \"interaction\", \"max_turns\": 1`.\n4. **Output:** Return ONLY raw JSON. No markdown formatting."
+        },
+        {
+            "id": "user_review",
+            "type": "interaction",
+            "max_turns": 1,
+            "prompt": "I created this flow for you:\n\n{{draft_flow}}\n\nType a filename to save it (e.g. 'follow_up'), or type 'no' to cancel."
+        },
+        {
+            "id": "save_file",
+            "type": "file_write",
+            "filename": "~/fast-flows/flows/{{user_review}}.json",
+            "content": "{{draft_flow}}",
+            "if": "{{user_review}} != 'no'"
+        }
+    ]
+}
