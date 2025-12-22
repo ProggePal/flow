@@ -1,0 +1,22 @@
+{
+  "model": "gemini-2.0-flash",
+  "steps": [
+    {
+      "id": "quick_add",
+      "type": "mcp",
+      "tool": "reminders",
+      "args": {
+        "listName": "todos",
+        "name": "{{input}}",
+        "operation": "create"
+      },
+      "if": "{{input}} != ''"
+    },
+    {
+      "id": "chat_add",
+      "type": "interaction",
+      "prompt": "User: Add a reminder to my list.",
+      "if": "{{input}} == ''"
+    }
+  ]
+}

@@ -45,9 +45,17 @@
           },
           "type": {
             "type": "string",
-            "enum": ["text", "interaction", "selector", "file_write"],
+            "enum": ["text", "interaction", "selector", "file_write", "mcp"],
             "default": "text",
             "description": "The type of action to perform."
+          },
+          "tool": {
+            "type": "string",
+            "description": "For 'mcp' type: The name of the tool to call."
+          },
+          "args": {
+            "type": "object",
+            "description": "For 'mcp' type: The arguments for the tool."
           },
           "prompt": {
             "type": "string",

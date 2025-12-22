@@ -23,17 +23,19 @@ type MCPConfig struct {
 
 // MCPManager manages multiple MCP clients
 type MCPManager struct {
-	Clients    []*client.Client
-	Tools      []mcp.Tool
-	ToolClient map[string]*client.Client
+	Clients       []*client.Client
+	Tools         []mcp.Tool
+	ToolClient    map[string]*client.Client
+	LoadedServers map[string]bool
 }
 
 // NewMCPManager creates a new MCP manager
 func NewMCPManager() *MCPManager {
 	return &MCPManager{
-		Clients:    make([]*client.Client, 0),
-		Tools:      make([]mcp.Tool, 0),
-		ToolClient: make(map[string]*client.Client),
+		Clients:       make([]*client.Client, 0),
+		Tools:         make([]mcp.Tool, 0),
+		ToolClient:    make(map[string]*client.Client),
+		LoadedServers: make(map[string]bool),
 	}
 }
 
@@ -73,8 +75,15 @@ func (m *MCPManager) LoadFromDirectory(ctx context.Context, dir string, allowedS
 				}
 			}
 
+			// Check if already loaded
+			if m.LoadedServers[conf.Name] {
+				continue
+			}
+
 			if err := m.startClient(ctx, conf); err != nil {
 				fmt.Printf("⚠️ Failed to start MCP %s: %v\n", conf.Name, err)
+			} else {
+				m.LoadedServers[conf.Name] = true
 			}
 		}
 	}

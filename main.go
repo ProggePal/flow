@@ -22,14 +22,16 @@ import (
 
 type Step struct {
 	ID, TabID, Model, Prompt string
-	Type                     string        `json:"type"`               // "text", "interaction", "selector", "file_write"
-	MaxTurns                 *int          `json:"max_turns"`          // for interaction
-	Source                   string        `json:"source"`             // for selector
-	Filename                 string        `json:"filename"`           // for file_write
-	Content                  string        `json:"content"`            // for file_write
-	If                       string        `json:"if"`                 // conditional execution
-	Output                   string        `json:"output,omitempty"`   // Result of the step
-	History                  []ChatMessage `json:"history,omitempty"`  // Chat history for interaction steps
+	Type                     string                 `json:"type"`               // "text", "interaction", "selector", "file_write", "mcp"
+	MaxTurns                 *int                   `json:"max_turns"`          // for interaction
+	Source                   string                 `json:"source"`             // for selector
+	Filename                 string                 `json:"filename"`           // for file_write
+	Content                  string                 `json:"content"`            // for file_write
+	If                       string                 `json:"if"`                 // conditional execution
+	Tool                     string                 `json:"tool,omitempty"`     // for mcp
+	Args                     map[string]interface{} `json:"args,omitempty"`     // for mcp
+	Output                   string                 `json:"output,omitempty"`   // Result of the step
+	History                  []ChatMessage          `json:"history,omitempty"`  // Chat history for interaction steps
 }
 
 type Config struct {
@@ -176,6 +178,7 @@ func listFlows() {
 }
 
 func runFlow(conf Config, p *tea.Program) {
+	ctx := context.Background()
 	// Build map of valid step IDs
 	validIDs := make(map[string]bool)
 	for _, s := range conf.Steps {
@@ -217,7 +220,7 @@ func runFlow(conf Config, p *tea.Program) {
 					history := []ChatMessage{}
 					// Add the initial system prompt/context if provided
 					if filledPrompt != "" {
-						history = append(history, ChatMessage{Role: "model", Parts: []map[string]string{{"text": filledPrompt}}})
+						history = append(history, ChatMessage{Role: "model", Parts: []map[string]interface{}{{"text": filledPrompt}}})
 					}
 
 					for {
@@ -228,12 +231,14 @@ func runFlow(conf Config, p *tea.Program) {
 							break
 						}
 
-						history = append(history, ChatMessage{Role: "user", Parts: []map[string]string{{"text": userIn}}})
+						history = append(history, ChatMessage{Role: "user", Parts: []map[string]interface{}{{"text": userIn}}})
 						
-						aiRes := callGeminiChat(model, conf.SystemPrompt, history)
+						aiRes, newMsgs := callGeminiChat(model, conf.SystemPrompt, history)
+						history = append(history, newMsgs...)
+
 						p.Send(StepInteractionOutputMsg{ID: s.ID, Output: aiRes})
 						
-						history = append(history, ChatMessage{Role: "model", Parts: []map[string]string{{"text": aiRes}}})
+						history = append(history, ChatMessage{Role: "model", Parts: []map[string]interface{}{{"text": aiRes}}})
 					}
 					
 					// Serialize history to text for result
@@ -243,7 +248,15 @@ func runFlow(conf Config, p *tea.Program) {
 						if msg.Role == "model" {
 							role = "AI"
 						}
-						sb.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Parts[0]["text"]))
+						if len(msg.Parts) > 0 {
+							if txt, ok := msg.Parts[0]["text"].(string); ok {
+								sb.WriteString(fmt.Sprintf("%s: %s\n", role, txt))
+							} else if _, ok := msg.Parts[0]["functionCall"]; ok {
+								sb.WriteString(fmt.Sprintf("%s: [Tool Call]\n", role))
+							} else if _, ok := msg.Parts[0]["functionResponse"]; ok {
+								sb.WriteString(fmt.Sprintf("%s: [Tool Result]\n", role))
+							}
+						}
 					}
 					res = sb.String()
 
@@ -300,23 +313,23 @@ func runFlow(conf Config, p *tea.Program) {
 				shouldRun := true
 				if s.If != "" {
 					cond := fillTags(s.If)
-					// Very basic check: if string contains "false" or "no" or "0", skip
-					// Or better: evaluate simple equality like "no != no"
-					// For now, let's just check if it evaluates to "false" string literal
-					// The user example is: "{{user_review}} != 'no'"
-					// This is hard to parse without an expression engine.
-					// Let's simplify: The user prompt says "Type a filename... or type 'no'".
-					// So if the filename is "no", we abort.
-					// Let's assume the condition is evaluated by the user logic before calling this, 
-					// OR we implement a very simple "value != 'no'" check.
-					
-					// Hacky eval:
-					parts := strings.Split(cond, "!=")
-					if len(parts) == 2 {
-						left := strings.TrimSpace(parts[0])
-						right := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
-						if left == right {
-							shouldRun = false
+					if strings.Contains(cond, "!=") {
+						parts := strings.Split(cond, "!=")
+						if len(parts) == 2 {
+							left := strings.TrimSpace(parts[0])
+							right := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+							if left == right {
+								shouldRun = false
+							}
+						}
+					} else if strings.Contains(cond, "==") {
+						parts := strings.Split(cond, "==")
+						if len(parts) == 2 {
+							left := strings.TrimSpace(parts[0])
+							right := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+							if left != right {
+								shouldRun = false
+							}
 						}
 					}
 				}
@@ -350,8 +363,99 @@ func runFlow(conf Config, p *tea.Program) {
 				} else {
 					res = "Skipped (Condition met)"
 				}
+			} else if s.Type == "mcp" {
+				// Check condition if present
+				shouldRun := true
+				if s.If != "" {
+					cond := fillTags(s.If)
+					if strings.Contains(cond, "!=") {
+						parts := strings.Split(cond, "!=")
+						if len(parts) == 2 {
+							left := strings.TrimSpace(parts[0])
+							right := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+							if left == right {
+								shouldRun = false
+							}
+						}
+					} else if strings.Contains(cond, "==") {
+						parts := strings.Split(cond, "==")
+						if len(parts) == 2 {
+							left := strings.TrimSpace(parts[0])
+							right := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+							if left != right {
+								shouldRun = false
+							}
+						}
+					}
+				}
+
+				if shouldRun {
+					// Resolve args
+					args := make(map[string]interface{})
+					for k, v := range s.Args {
+						if strVal, ok := v.(string); ok {
+							args[k] = fillTags(strVal)
+						} else {
+							args[k] = v
+						}
+					}
+
+					// Call tool
+					result, err := mcpManager.CallTool(ctx, s.Tool, args)
+					if err != nil {
+						res = fmt.Sprintf("Error calling tool %s: %v", s.Tool, err)
+					} else {
+						// Serialize content to string
+						contentBytes, _ := json.Marshal(result.Content)
+						res = string(contentBytes)
+					}
+				} else {
+					res = "Skipped (Condition met)"
+				}
 			} else {
-				res = callGemini(model, conf.SystemPrompt, fillTags(s.Prompt))
+				// Use callGeminiChat to support tools and logging
+				// Check condition if present
+				shouldRun := true
+				if s.If != "" {
+					cond := fillTags(s.If)
+					if strings.Contains(cond, "!=") {
+						parts := strings.Split(cond, "!=")
+						if len(parts) == 2 {
+							left := strings.TrimSpace(parts[0])
+							right := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+							if left == right {
+								shouldRun = false
+							}
+						}
+					} else if strings.Contains(cond, "==") {
+						parts := strings.Split(cond, "==")
+						if len(parts) == 2 {
+							left := strings.TrimSpace(parts[0])
+							right := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+							if left != right {
+								shouldRun = false
+							}
+						}
+					}
+				}
+
+				if shouldRun {
+					prompt := fillTags(s.Prompt)
+					history := []ChatMessage{{Role: "user", Parts: []map[string]interface{}{{"text": prompt}}}}
+					
+					var newMsgs []ChatMessage
+					res, newMsgs = callGeminiChat(model, conf.SystemPrompt, history)
+					
+					// Save history including tool calls
+					fullHistory := append(history, newMsgs...)
+					fullHistory = append(fullHistory, ChatMessage{Role: "model", Parts: []map[string]interface{}{{"text": res}}})
+					
+					mu.Lock()
+					histories[s.ID] = fullHistory
+					mu.Unlock()
+				} else {
+					res = "Skipped (Condition met)"
+				}
 			}
 
 			if res == "" {
@@ -420,13 +524,13 @@ func fillTags(prompt string) string {
 }
 
 type ChatMessage struct {
-	Role  string              `json:"role"`
-	Parts []map[string]string `json:"parts"`
+	Role  string                   `json:"role"`
+	Parts []map[string]interface{} `json:"parts"`
 }
 
-var callGeminiChat = func(model, sys string, history []ChatMessage) string {
+var callGeminiChat = func(model, sys string, history []ChatMessage) (string, []ChatMessage) {
 	if os.Getenv("MOCK_FLOW") == "true" {
-		return "Mocked response"
+		return "Mocked response", nil
 	}
 	apiKey := getAPIKey()
 	ctx := context.Background()
@@ -436,7 +540,7 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) string {
 	})
 	if err != nil {
 		fmt.Printf("Error creating client: %v\n", err)
-		return ""
+		return "", nil
 	}
 
 	// Convert history to GenAI format
@@ -448,8 +552,32 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) string {
 		}
 		parts := make([]*genai.Part, 0)
 		for _, p := range msg.Parts {
-			if text, ok := p["text"]; ok {
+			if text, ok := p["text"].(string); ok {
 				parts = append(parts, &genai.Part{Text: text})
+			} else if fcMap, ok := p["functionCall"].(map[string]interface{}); ok {
+				// Reconstruct FunctionCall
+				args := make(map[string]interface{})
+				if a, ok := fcMap["args"].(map[string]interface{}); ok {
+					args = a
+				}
+				parts = append(parts, &genai.Part{
+					FunctionCall: &genai.FunctionCall{
+						Name: fcMap["name"].(string),
+						Args: args,
+					},
+				})
+			} else if frMap, ok := p["functionResponse"].(map[string]interface{}); ok {
+				// Reconstruct FunctionResponse
+				resp := make(map[string]interface{})
+				if r, ok := frMap["response"].(map[string]interface{}); ok {
+					resp = r
+				}
+				parts = append(parts, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name:     frMap["name"].(string),
+						Response: resp,
+					},
+				})
 			}
 		}
 		contents = append(contents, &genai.Content{
@@ -473,16 +601,18 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) string {
 		}
 	}
 
+	var newMessages []ChatMessage
+
 	// Main interaction loop for function calling
 	for {
 		resp, err := client.Models.GenerateContent(ctx, model, contents, conf)
 		if err != nil {
 			fmt.Printf("Error generating content: %v\n", err)
-			return ""
+			return "", newMessages
 		}
 
 		if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-			return ""
+			return "", newMessages
 		}
 
 		part := resp.Candidates[0].Content.Parts[0]
@@ -492,18 +622,47 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) string {
 			fc := part.FunctionCall
 			fmt.Printf("🤖 Calling tool: %s\n", fc.Name)
 			
+			// Record FunctionCall
+			newMessages = append(newMessages, ChatMessage{
+				Role: "model",
+				Parts: []map[string]interface{}{
+					{
+						"functionCall": map[string]interface{}{
+							"name": fc.Name,
+							"args": fc.Args,
+						},
+					},
+				},
+			})
+
 			// Execute tool
-			result, err := mcpManager.CallTool(ctx, fc.Name, fc.Args)
+			fmt.Printf("⏳ Executing %s...\n", fc.Name)
+			toolCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			result, err := mcpManager.CallTool(toolCtx, fc.Name, fc.Args)
+			cancel()
+			
 			var toolResult map[string]interface{}
 			if err != nil {
+				fmt.Printf("❌ Tool error: %v\n", err)
 				toolResult = map[string]interface{}{"error": err.Error()}
 			} else {
+				fmt.Printf("✅ Tool success\n")
 				// Convert MCP result to map for GenAI
-				// MCP result content is usually a list of content objects.
-				// We'll just dump the whole thing or extract text.
-				// For simplicity, let's just pass the content list.
 				toolResult = map[string]interface{}{"content": result.Content}
 			}
+
+			// Record FunctionResponse
+			newMessages = append(newMessages, ChatMessage{
+				Role: "function", // "function" role is often used for responses, but GenAI uses "user" with FunctionResponse part
+				Parts: []map[string]interface{}{
+					{
+						"functionResponse": map[string]interface{}{
+							"name":     fc.Name,
+							"response": toolResult,
+						},
+					},
+				},
+			})
 
 			// Append model's function call to history
 			contents = append(contents, &genai.Content{
@@ -528,10 +687,10 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) string {
 
 		// If it's text, return it
 		if part.Text != "" {
-			return part.Text
+			return part.Text, newMessages
 		}
 		
-		return ""
+		return "", newMessages
 	}
 }
 
@@ -607,46 +766,6 @@ func mapSubSchema(m map[string]interface{}) *genai.Schema {
 		}
 	}
 	return s
-}
-
-var callGemini = func(model, sys, prompt string) string {
-	if os.Getenv("MOCK_FLOW") == "true" {
-		return "Mocked response for: " + prompt
-	}
-	apiKey := getAPIKey()
-	ctx := context.Background()
-
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-	})
-	if err != nil {
-		fmt.Printf("Error creating client: %v\n", err)
-		return ""
-	}
-
-	conf := &genai.GenerateContentConfig{}
-	if sys != "" {
-		conf.SystemInstruction = &genai.Content{
-			Parts: []*genai.Part{{Text: sys}},
-		}
-	}
-
-	resp, err := client.Models.GenerateContent(ctx, model, []*genai.Content{
-		{
-			Role: "user",
-			Parts: []*genai.Part{{Text: prompt}},
-		},
-	}, conf)
-
-	if err != nil {
-		fmt.Printf("Error generating content: %v\n", err)
-		return ""
-	}
-
-	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-		return resp.Candidates[0].Content.Parts[0].Text
-	}
-	return ""
 }
 
 func copyToClipboard(s string) {
