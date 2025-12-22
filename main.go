@@ -13,7 +13,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// --- Configuration & Types ---
 
 type Step struct {
 	ID, TabID, Model, Prompt string
@@ -23,6 +27,8 @@ type Config struct {
 	Model, SystemPrompt string
 	Steps               []Step
 }
+
+// --- Main Logic ---
 
 var (
 	results   = make(map[string]string)
@@ -70,10 +76,26 @@ func main() {
 		return
 	}
 
-	runFlow(conf)
+	// Get clipboard content for UI
+	clipboardContent := ""
+	out, _ := exec.Command("pbpaste").Output()
+	clipboardContent = string(out)
 
-	copyToClipboard(results[conf.Steps[len(conf.Steps)-1].ID])
-	fmt.Printf("✅ %s finished. Result copied to clipboard.\n", flowName)
+	// Initialize TUI
+	p := tea.NewProgram(InitialModel(conf, flowName, clipboardContent, userInput))
+
+	// Run flow in background
+	go func() {
+		runFlow(conf, p)
+		finalResult := results[conf.Steps[len(conf.Steps)-1].ID]
+		copyToClipboard(finalResult)
+		p.Send(FlowFinishedMsg{Result: finalResult})
+	}()
+
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Alas, there's been an error: %v", err)
+		os.Exit(1)
+	}
 }
 
 func listFlows() {
@@ -94,7 +116,7 @@ func listFlows() {
 	fmt.Println()
 }
 
-func runFlow(conf Config) {
+func runFlow(conf Config, p *tea.Program) {
 	var wg sync.WaitGroup
 	for _, step := range conf.Steps {
 		wg.Add(1)
@@ -104,17 +126,11 @@ func runFlow(conf Config) {
 				time.Sleep(100 * time.Millisecond)
 			} // Automatic Parallel Detection
 
-			// Feedback
-			tags := regexp.MustCompile(`{{(.*?)}}`).FindAllStringSubmatch(s.Prompt, -1)
-			var sources []string
-			for _, t := range tags {
-				sources = append(sources, t[1])
+			if p != nil {
+				p.Send(StepStartedMsg{ID: s.ID})
+			} else {
+				fmt.Printf("Running %s...\n", s.ID)
 			}
-			sourceStr := strings.Join(sources, " + ")
-			if len(sources) == 0 {
-				sourceStr = "Start"
-			}
-			fmt.Printf("  %s -> %s ...\n", sourceStr, s.ID)
 
 			model := conf.Model
 			if s.Model != "" {
@@ -123,13 +139,22 @@ func runFlow(conf Config) {
 
 			res := callGemini(model, conf.SystemPrompt, fillTags(s.Prompt))
 			if res == "" {
-				fmt.Printf("❌ Step '%s' failed. Stopping flow.\n", s.ID)
+				err := fmt.Errorf("step '%s' failed", s.ID)
+				if p != nil {
+					p.Send(StepFailedMsg{ID: s.ID, Err: err})
+				} else {
+					fmt.Printf("❌ %v\n", err)
+				}
 				os.Exit(1)
 			}
 
 			mu.Lock()
 			results[s.ID] = res
 			mu.Unlock()
+
+			if p != nil {
+				p.Send(StepDoneMsg{ID: s.ID})
+			}
 		}(step)
 	}
 	wg.Wait()

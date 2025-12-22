@@ -3,7 +3,7 @@
 # 1. Build the binary
 echo "📦 Building 'fast' binary..."
 # Build for macOS (ARM64) - Change GOOS/GOARCH if you need to support other platforms
-env GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o fast main.go
+env GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o fast .
 
 if [ $? -ne 0 ]; then
     echo "❌ Build failed."

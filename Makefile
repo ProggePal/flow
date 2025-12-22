@@ -3,7 +3,7 @@
 BINARY_NAME=fast
 
 build:
-	go build -o $(BINARY_NAME) main.go
+	go build -o $(BINARY_NAME) .
 
 test:
 	go test ./...
