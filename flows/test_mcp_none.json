@@ -1,0 +1,11 @@
+{
+  "model": "gemini-2.0-flash",
+  "mcp": "none",
+  "steps": [
+    {
+      "id": "step1",
+      "type": "text",
+      "prompt": "List the tools you have available."
+    }
+  ]
+}

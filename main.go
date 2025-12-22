@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +14,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mark3labs/mcp-go/mcp"
+	"google.golang.org/genai"
 )
 
 // --- Configuration & Types ---
@@ -35,20 +35,22 @@ type Step struct {
 type Config struct {
 	Model, SystemPrompt string
 	Steps               []Step
-	Timestamp           time.Time `json:"timestamp,omitempty"`
-	FlowName            string    `json:"flow_name,omitempty"`
-	Input               string    `json:"input,omitempty"`
-	Clipboard           string    `json:"clipboard,omitempty"`
+	Timestamp           time.Time       `json:"timestamp,omitempty"`
+	FlowName            string          `json:"flow_name,omitempty"`
+	Input               string          `json:"input,omitempty"`
+	Clipboard           string          `json:"clipboard,omitempty"`
+	MCP                 json.RawMessage `json:"mcp,omitempty"`
 }
 
 // --- Main Logic ---
 
 var (
-	results   = make(map[string]string)
-	histories = make(map[string][]ChatMessage)
-	userInput string
-	mu        sync.Mutex
-	inputChan = make(chan string) // Channel for TUI to send user input
+	results    = make(map[string]string)
+	histories  = make(map[string][]ChatMessage)
+	userInput  string
+	mu         sync.Mutex
+	inputChan  = make(chan string) // Channel for TUI to send user input
+	mcpManager *MCPManager
 )
 
 func main() {
@@ -92,6 +94,44 @@ func main() {
 	if len(conf.Steps) == 0 {
 		fmt.Println("❌ Flow configuration has no steps.")
 		return
+	}
+
+	// Initialize MCP Manager
+	mcpManager = NewMCPManager()
+	defer mcpManager.Close()
+	ctx := context.Background()
+
+	// Parse MCP config
+	var allowedServers map[string]bool
+	if len(conf.MCP) > 0 {
+		var mcpStr string
+		if err := json.Unmarshal(conf.MCP, &mcpStr); err == nil {
+			if mcpStr == "none" {
+				allowedServers = make(map[string]bool) // Empty map = allow none
+			} else if mcpStr == "all" {
+				allowedServers = nil // Nil map = allow all
+			}
+		} else {
+			var mcpList []string
+			if err := json.Unmarshal(conf.MCP, &mcpList); err == nil {
+				allowedServers = make(map[string]bool)
+				for _, s := range mcpList {
+					allowedServers[s] = true
+				}
+			}
+		}
+	}
+
+	// Load MCPs from local ./mcp folder
+	if err := mcpManager.LoadFromDirectory(ctx, "./mcp", allowedServers); err != nil {
+		// fmt.Printf("⚠️ Failed to load local MCPs: %v\n", err)
+	}
+
+	// Load MCPs from global ~/fast-flows/mcp folder
+	home, _ := os.UserHomeDir()
+	globalMcpPath := filepath.Join(home, "fast-flows", "mcp")
+	if err := mcpManager.LoadFromDirectory(ctx, globalMcpPath, allowedServers); err != nil {
+		// fmt.Printf("⚠️ Failed to load global MCPs: %v\n", err)
 	}
 
 	// Get clipboard content for UI
@@ -389,44 +429,184 @@ var callGeminiChat = func(model, sys string, history []ChatMessage) string {
 		return "Mocked response"
 	}
 	apiKey := getAPIKey()
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	ctx := context.Background()
+	
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+	})
+	if err != nil {
+		fmt.Printf("Error creating client: %v\n", err)
+		return ""
+	}
 
-	payload := map[string]interface{}{
-		"contents": history,
+	// Convert history to GenAI format
+	var contents []*genai.Content
+	for _, msg := range history {
+		role := "user"
+		if msg.Role == "model" {
+			role = "model"
+		}
+		parts := make([]*genai.Part, 0)
+		for _, p := range msg.Parts {
+			if text, ok := p["text"]; ok {
+				parts = append(parts, &genai.Part{Text: text})
+			}
+		}
+		contents = append(contents, &genai.Content{
+			Role:  role,
+			Parts: parts,
+		})
+	}
+
+	// Configure tools
+	var tools []*genai.Tool
+	if len(mcpManager.Tools) > 0 {
+		tools = convertTools(mcpManager.Tools)
+	}
+
+	conf := &genai.GenerateContentConfig{
+		Tools: tools,
 	}
 	if sys != "" {
-		payload["system_instruction"] = map[string]interface{}{"parts": []map[string]string{{"text": sys}}}
+		conf.SystemInstruction = &genai.Content{
+			Parts: []*genai.Part{{Text: sys}},
+		}
 	}
 
-	jsonData, _ := json.Marshal(payload)
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
+	// Main interaction loop for function calling
+	for {
+		resp, err := client.Models.GenerateContent(ctx, model, contents, conf)
+		if err != nil {
+			fmt.Printf("Error generating content: %v\n", err)
+			return ""
+		}
+
+		if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+			return ""
+		}
+
+		part := resp.Candidates[0].Content.Parts[0]
+
+		// Check for function call
+		if part.FunctionCall != nil {
+			fc := part.FunctionCall
+			fmt.Printf("🤖 Calling tool: %s\n", fc.Name)
+			
+			// Execute tool
+			result, err := mcpManager.CallTool(ctx, fc.Name, fc.Args)
+			var toolResult map[string]interface{}
+			if err != nil {
+				toolResult = map[string]interface{}{"error": err.Error()}
+			} else {
+				// Convert MCP result to map for GenAI
+				// MCP result content is usually a list of content objects.
+				// We'll just dump the whole thing or extract text.
+				// For simplicity, let's just pass the content list.
+				toolResult = map[string]interface{}{"content": result.Content}
+			}
+
+			// Append model's function call to history
+			contents = append(contents, &genai.Content{
+				Role: "model",
+				Parts: []*genai.Part{{FunctionCall: fc}},
+			})
+
+			// Append our function response to history
+			contents = append(contents, &genai.Content{
+				Role: "user",
+				Parts: []*genai.Part{{
+					FunctionResponse: &genai.FunctionResponse{
+						Name:     fc.Name,
+						Response: toolResult,
+					},
+				}},
+			})
+			
+			// Loop to get the next response from the model
+			continue
+		}
+
+		// If it's text, return it
+		if part.Text != "" {
+			return part.Text
+		}
+		
 		return ""
 	}
-	defer resp.Body.Close()
+}
 
-	body, _ := io.ReadAll(resp.Body)
-	var res map[string]interface{}
-	if err := json.Unmarshal(body, &res); err != nil {
-		return ""
+func convertTools(mcpTools []mcp.Tool) []*genai.Tool {
+	var genaiTools []*genai.Tool
+	for _, t := range mcpTools {
+		genaiTools = append(genaiTools, &genai.Tool{
+			FunctionDeclarations: []*genai.FunctionDeclaration{
+				{
+					Name:        t.Name,
+					Description: t.Description,
+					Parameters:  mapSchema(t.InputSchema),
+				},
+			},
+		})
+	}
+	return genaiTools
+}
+
+func mapSchema(schema mcp.ToolInputSchema) *genai.Schema {
+	s := &genai.Schema{
+		Type:       genai.TypeObject,
+		Properties: make(map[string]*genai.Schema),
+		Required:   schema.Required,
 	}
 
-	if _, ok := res["error"]; ok {
-		return ""
+	for k, v := range schema.Properties {
+		if subMap, ok := v.(map[string]interface{}); ok {
+			s.Properties[k] = mapSubSchema(subMap)
+		}
 	}
 
-	candidates, ok := res["candidates"].([]interface{})
-	if !ok || len(candidates) == 0 {
-		return ""
-	}
+	return s
+}
 
-	candidate := candidates[0].(map[string]interface{})
-	content, ok := candidate["content"].(map[string]interface{})
-	if !ok {
-		return ""
+func mapSubSchema(m map[string]interface{}) *genai.Schema {
+	s := &genai.Schema{}
+	if t, ok := m["type"].(string); ok {
+		switch t {
+		case "string":
+			s.Type = genai.TypeString
+		case "number":
+			s.Type = genai.TypeNumber
+		case "integer":
+			s.Type = genai.TypeInteger
+		case "boolean":
+			s.Type = genai.TypeBoolean
+		case "array":
+			s.Type = genai.TypeArray
+		case "object":
+			s.Type = genai.TypeObject
+		}
 	}
-
-	return content["parts"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	if d, ok := m["description"].(string); ok {
+		s.Description = d
+	}
+	if props, ok := m["properties"].(map[string]interface{}); ok {
+		s.Properties = make(map[string]*genai.Schema)
+		for k, v := range props {
+			if subMap, ok := v.(map[string]interface{}); ok {
+				s.Properties[k] = mapSubSchema(subMap)
+			}
+		}
+	}
+	if items, ok := m["items"].(map[string]interface{}); ok {
+		s.Items = mapSubSchema(items)
+	}
+	if req, ok := m["required"].([]interface{}); ok {
+		for _, r := range req {
+			if str, ok := r.(string); ok {
+				s.Required = append(s.Required, str)
+			}
+		}
+	}
+	return s
 }
 
 var callGemini = func(model, sys, prompt string) string {
@@ -434,66 +614,39 @@ var callGemini = func(model, sys, prompt string) string {
 		return "Mocked response for: " + prompt
 	}
 	apiKey := getAPIKey()
-	if apiKey == "" {
-		fmt.Println("❌ No API Key found!")
-		home, _ := os.UserHomeDir()
-		keyPath := filepath.Join(home, ".fast_key")
-		fmt.Printf("   (Checked environment variable GEMINI_API_KEY and file: %s)\n", keyPath)
-		fmt.Println("👉 Please run the installer again to set up your key.")
-		os.Exit(1)
-	}
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	ctx := context.Background()
 
-	payload := map[string]interface{}{
-		"contents": []map[string]interface{}{{"parts": []map[string]string{{"text": prompt}}}},
-	}
-	if sys != "" {
-		payload["system_instruction"] = map[string]interface{}{"parts": []map[string]string{{"text": sys}}}
-	}
-
-	jsonData, _ := json.Marshal(payload)
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+	})
 	if err != nil {
-		fmt.Printf("❌ Network error: %v\n", err)
-		return ""
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	var res map[string]interface{}
-	if err := json.Unmarshal(body, &res); err != nil {
-		fmt.Printf("❌ Failed to parse API response: %v\nBody: %s\n", err, string(body))
+		fmt.Printf("Error creating client: %v\n", err)
 		return ""
 	}
 
-	if errVal, ok := res["error"]; ok {
-		fmt.Printf("❌ API Error: %v\n", errVal)
-		return ""
-	}
-
-	candidates, ok := res["candidates"].([]interface{})
-	if !ok || len(candidates) == 0 {
-		// Check if it was blocked due to safety
-		if promptFeedback, ok := res["promptFeedback"]; ok {
-			fmt.Printf("❌ Prompt blocked. Feedback: %v\n", promptFeedback)
-		} else {
-			fmt.Printf("❌ No candidates returned. Response: %s\n", string(body))
+	conf := &genai.GenerateContentConfig{}
+	if sys != "" {
+		conf.SystemInstruction = &genai.Content{
+			Parts: []*genai.Part{{Text: sys}},
 		}
+	}
+
+	resp, err := client.Models.GenerateContent(ctx, model, []*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{{Text: prompt}},
+		},
+	}, conf)
+
+	if err != nil {
+		fmt.Printf("Error generating content: %v\n", err)
 		return ""
 	}
 
-	candidate := candidates[0].(map[string]interface{})
-	content, ok := candidate["content"].(map[string]interface{})
-	if !ok {
-		if finishReason, ok := candidate["finishReason"]; ok {
-			fmt.Printf("❌ Generation stopped. Reason: %v\n", finishReason)
-		} else {
-			fmt.Printf("❌ Unexpected response structure: %s\n", string(body))
-		}
-		return ""
+	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+		return resp.Candidates[0].Content.Parts[0].Text
 	}
-
-	return content["parts"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	return ""
 }
 
 func copyToClipboard(s string) {

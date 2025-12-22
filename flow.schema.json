@@ -11,6 +11,22 @@
       "description": "The default Gemini model to use (e.g., gemini-2.0-flash).",
       "default": "gemini-2.0-flash"
     },
+    "mcp": {
+      "description": "MCP servers to load. Can be 'all', 'none', or a list of server names.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["all", "none"]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ],
+      "default": "all"
+    },
     "system_prompt": {
       "type": "string",
       "description": "Global system instructions for the AI."

@@ -43,10 +43,16 @@ sudo xattr -dr com.apple.quarantine /usr/local/bin/fast 2>/dev/null || true
 # 3. Bring in your Workflows
 echo "📂 Downloading your initial flows..."
 mkdir -p "$HOME/fast-flows/flows"
+mkdir -p "$HOME/fast-flows/mcp"
+
+# Download Flows
 curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/scope.json" -o "$HOME/fast-flows/flows/scope.json"
 curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/sum.json" -o "$HOME/fast-flows/flows/sum.json"
 curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/flows/reply.json" -o "$HOME/fast-flows/flows/reply.json"
 curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/how-to-flow.md" -o "$HOME/fast-flows/README.md"
+
+# Download MCP Readme
+curl -sSL "https://raw.githubusercontent.com/ProggePal/flow/main/mcp/README.md" -o "$HOME/fast-flows/mcp/README.md"
 
 echo ""
 echo "✨ All set! You can now use Fast Flow anywhere."

@@ -1,0 +1,5 @@
+{
+  "name": "apple-mcp",
+  "command": "bunx",
+  "args": ["--no-cache", "apple-mcp@latest"]
+}
